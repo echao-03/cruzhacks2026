@@ -15,7 +15,7 @@ const pickupMarkerIcon = {
 };
 
 const routePolylineOptions = {
-  strokeColor: '#1e66ff'
+  strokeColor: '#1e66ff',
   strokeOpacity: 1,
   strokeWeight: 4,
 };
