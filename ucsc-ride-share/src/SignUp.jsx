@@ -48,6 +48,7 @@ function SignUp() {
           car_model: carModel || null,
           car_color: carColor || null,
           license_plate: licensePlate || null,
+          password: password || null,
         });
 
       if (profileError) {
