@@ -29,24 +29,24 @@ function Landing() {
         <GlassCard className="space-y-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
-              Quick previews
+              Driver tools
             </p>
             <h2 className="text-xl font-semibold text-[#3d342a]">
-              Jump to maps
+              Start navigation
             </h2>
           </div>
           <div className="flex flex-col gap-3">
             <Link
-              to="/driver-demo"
+              to="/driver"
               className="rounded-2xl bg-[#4f5b4a] px-4 py-3 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
             >
-              Skip to Driver
+              Go to Driver View
             </Link>
             <Link
-              to="/rider-demo"
+              to="/rider"
               className="rounded-2xl border border-[#6a5a48] px-4 py-3 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
             >
-              Skip to Rider
+              Go to Rider View
             </Link>
           </div>
         </GlassCard>

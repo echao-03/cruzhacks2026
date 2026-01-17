@@ -29,13 +29,14 @@ function PageHeader({ eyebrow = 'SlugCruise', title, subtitle, className }) {
   );
 }
 
-function SurfaceCard({ children, className }) {
+function SurfaceCard({ children, className, ...props }) {
   return (
     <div
       className={cx(
         'rounded-3xl border border-[#d7c5b1] bg-[#fbf7f0] p-5 shadow-[0_16px_34px_rgba(68,54,41,0.2)]',
         className
       )}
+      {...props}
     >
       {children}
     </div>
@@ -55,4 +56,33 @@ function GlassCard({ children, className }) {
   );
 }
 
-export { PageFrame, PageHeader, SurfaceCard, GlassCard, cx };
+function HeaderRow({ title, subtitle, eyebrow, action, className }) {
+  return (
+    <div
+      className={cx(
+        'flex flex-col gap-4 md:flex-row md:items-start md:justify-between',
+        className
+      )}
+    >
+      <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} />
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+function ProfileButton({ label = 'Profile', initials = 'U' }) {
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-3 rounded-full border border-[#d7c5b1] bg-[#fbf7f0] px-4 py-2 text-sm font-semibold text-[#3b3127] shadow-[0_12px_24px_rgba(68,54,41,0.18)] transition hover:bg-[#f1e6d9]"
+      aria-label={label}
+    >
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#6f604f] text-xs font-semibold text-[#f7f1e8]">
+        {initials}
+      </span>
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
+export { PageFrame, PageHeader, SurfaceCard, GlassCard, HeaderRow, ProfileButton, cx };
