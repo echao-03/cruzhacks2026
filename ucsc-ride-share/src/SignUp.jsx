@@ -13,6 +13,7 @@ function SignUp() {
   const [licensePlate, setLicensePlate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [userName, setUserName] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +24,7 @@ function SignUp() {
       // Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: ucscEmail,
+        username: userName,
         password,
         options: {
           data: {
@@ -49,6 +51,7 @@ function SignUp() {
           car_color: carColor || null,
           license_plate: licensePlate || null,
           password: password || null,
+          username: userName || null,
         });
 
       if (profileError) {
@@ -71,6 +74,19 @@ function SignUp() {
         <h2 className="text-2xl font-bold mb-6 text-center">Sign Up</h2>
         {error && <p className="text-red-500 text-center mb-4">{error}</p>}
         <form onSubmit={handleSubmit}>
+            <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="userName">
+              Username
+            </label>
+            <input
+              type="text"
+              id="userName"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              required
+            />
+          </div>
           <div className="mb-4">
             <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="fullName">
               Full Name

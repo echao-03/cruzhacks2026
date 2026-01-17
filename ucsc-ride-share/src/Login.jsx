@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from './utils/supabase';
 
 function Login() {
@@ -7,6 +7,7 @@ function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -14,8 +15,23 @@ function Login() {
     setError('');
 
     try {
+      let emailToUse = username;
+
+      // First, try to find the user by username in the profiles table
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('ucsc_email')
+        .eq('username', username)
+        .single();
+
+      if (!profileError && profileData) {
+        // Username found, use the associated email
+        emailToUse = profileData.ucsc_email;
+      }
+      // If username not found, assume the input is an email and proceed
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: username, // Assuming username is email
+        email: emailToUse,
         password,
       });
 
@@ -24,9 +40,28 @@ function Login() {
         return;
       }
 
+      // Fetch user profile data
+      const { data: profile, error: profileError2 } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+
+      if (profileError2) {
+        setError('Login successful but failed to load profile data.');
+        return;
+      }
+
       alert('Login successful!');
       localStorage.setItem('supabase_session', JSON.stringify(data.session));
-      // Redirect to dashboard or home
+      
+      // Navigate to rider selection map with user data
+      navigate('/rider', { 
+        state: { 
+          user: data.user, 
+          profile: profile 
+        } 
+      });
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
     } finally {

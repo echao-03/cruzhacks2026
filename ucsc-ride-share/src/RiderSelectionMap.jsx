@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { GoogleMap, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
+import { useLocation } from 'react-router-dom';
 
 const defaultMapContainerStyle = {
   width: '100%',
@@ -91,6 +92,8 @@ function RiderSelectionMap({
   tripPolyline,
   mapContainerStyle = defaultMapContainerStyle,
 }) {
+  const location = useLocation();
+  const { user, profile } = location.state || {};
   const decodedPath = useMemo(() => {
     if (
       !tripPolyline ||
@@ -115,11 +118,30 @@ function RiderSelectionMap({
     riderLocation || decodedPath[0] || nearestPoint || { lat: 0, lng: 0 };
 
   return (
-    <GoogleMap
-      mapContainerStyle={mapContainerStyle}
-      center={mapCenter}
-      zoom={14}
-    >
+    <div className="min-h-screen bg-gray-100">
+      {/* User Info Header */}
+      {profile && (
+        <div className="bg-white shadow-md p-4 mb-4">
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-2xl font-bold text-gray-800">
+              Welcome, {profile.full_name}!
+            </h1>
+            <div className="mt-2 text-sm text-gray-600">
+              <p>Email: {profile.ucsc_email}</p>
+              <p>Age: {profile.age} | Gender: {profile.gender}</p>
+              {profile.car_model && (
+                <p>Vehicle: {profile.car_color} {profile.car_model} ({profile.license_plate})</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <GoogleMap
+        mapContainerStyle={mapContainerStyle}
+        center={mapCenter}
+        zoom={14}
+      >
       {decodedPath.length > 0 && (
         <Polyline path={decodedPath} options={routePolylineOptions} />
       )}
@@ -144,6 +166,7 @@ function RiderSelectionMap({
         />
       )}
     </GoogleMap>
+    </div>
   );
 }
 
