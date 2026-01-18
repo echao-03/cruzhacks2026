@@ -27,8 +27,8 @@ function SignUp() {
 
     try {
       const normalizedEmail = ucscEmail.trim().toLowerCase();
-      if (!normalizedEmail.endsWith('.ucsc.edu')) {
-        setError('Please use your .ucsc.edu email address to sign up.');
+      if (!normalizedEmail.endsWith('ucsc.edu')) {
+        setError('Please use your ucsc.edu email address to sign up.');
         return;
       }
 
