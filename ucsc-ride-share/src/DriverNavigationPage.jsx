@@ -33,6 +33,28 @@ const destinationLabels = {
   WEST_REMOTE: 'West Remote',
 };
 
+const normalizePolyline = (overviewPolyline) => {
+  if (!overviewPolyline) {
+    return '';
+  }
+
+  if (typeof overviewPolyline === 'string') {
+    return overviewPolyline;
+  }
+
+  return typeof overviewPolyline.points === 'string'
+    ? overviewPolyline.points
+    : '';
+};
+
+const encodeOverviewPath = (overviewPath) => {
+  if (!overviewPath || !window.google?.maps?.geometry?.encoding?.encodePath) {
+    return '';
+  }
+
+  return window.google.maps.geometry.encoding.encodePath(overviewPath);
+};
+
 const toFixedCoord = (value) => Number(value).toFixed(6);
 
 const formatTime = (value) => {
@@ -79,6 +101,15 @@ const computeArrivalTime = (departureTime, durationSeconds) => {
 
 function DriverNavigationPage() {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const debugSchedule = import.meta.env.VITE_ROUTE_DEBUG === 'true';
+  const logDebug = useCallback(
+    (...args) => {
+      if (debugSchedule) {
+        console.info('[DriverNavigation]', ...args);
+      }
+    },
+    [debugSchedule]
+  );
   const { isLoaded, loadError } = useLoadScript({
     googleMapsApiKey: apiKey,
     libraries,
@@ -102,6 +133,8 @@ function DriverNavigationPage() {
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [routeOptions, setRouteOptions] = useState([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(null);
+  const [selectedRoutePolyline, setSelectedRoutePolyline] = useState('');
+  const [selectedRouteDuration, setSelectedRouteDuration] = useState(0);
   const [directionsResponse, setDirectionsResponse] = useState(null);
   const [routeError, setRouteError] = useState('');
   const [scheduleError, setScheduleError] = useState('');
@@ -119,17 +152,36 @@ function DriverNavigationPage() {
   useEffect(() => {
     setRouteOptions([]);
     setSelectedRouteIndex(null);
+    setSelectedRoutePolyline('');
+    setSelectedRouteDuration(0);
     setDirectionsResponse(null);
   }, [driverStart, scheduleForm.destinationId]);
+
+  useEffect(() => {
+    if (
+      !destinationOptions.some((option) => option.id === scheduleForm.destinationId)
+    ) {
+      setScheduleForm((prev) => ({
+        ...prev,
+        destinationId: destinationOptions[0].id,
+      }));
+    }
+  }, [scheduleForm.destinationId]);
 
   const selectedRoute = useMemo(
     () => routeOptions.find((route) => route.index === selectedRouteIndex) || null,
     [routeOptions, selectedRouteIndex]
   );
 
+  useEffect(() => {
+    if (selectedRoute?.polyline) {
+      setScheduleError('');
+    }
+  }, [selectedRoute]);
+
   const estimatedArrivalTime = useMemo(
-    () => computeArrivalTime(scheduleForm.departureTime, selectedRoute?.duration),
-    [scheduleForm.departureTime, selectedRoute]
+    () => computeArrivalTime(scheduleForm.departureTime, selectedRouteDuration),
+    [scheduleForm.departureTime, selectedRouteDuration]
   );
 
   const scheduleSummary = useMemo(() => {
@@ -248,6 +300,7 @@ function DriverNavigationPage() {
       return;
     }
 
+    logDebug('computeRoutes:start', { driverStart, destination });
     setIsRouting(true);
     setRouteError('');
 
@@ -261,7 +314,12 @@ function DriverNavigationPage() {
       },
       (result, status) => {
         if (status !== 'OK' || !result?.routes?.length) {
-          setRouteError('Unable to compute routes.');
+          logDebug('computeRoutes:error', { status, result });
+          setRouteError(
+            status && status !== 'OK'
+              ? `Unable to compute routes (${status}).`
+              : 'Unable to compute routes.'
+          );
           setIsRouting(false);
           return;
         }
@@ -269,6 +327,12 @@ function DriverNavigationPage() {
         const mappedRoutes = result.routes
           .map((route, index) => {
             const leg = route.legs?.[0];
+            let polyline = normalizePolyline(route.overview_polyline);
+
+            if (!polyline && route.overview_path) {
+              polyline = encodeOverviewPath(route.overview_path);
+            }
+
             return {
               index,
               summary: route.summary || `Route ${index + 1}`,
@@ -276,7 +340,7 @@ function DriverNavigationPage() {
               durationText: leg?.duration?.text || '—',
               distance: leg?.distance?.value || 0,
               distanceText: leg?.distance?.text || '—',
-              polyline: route.overview_polyline?.points || '',
+              polyline,
             };
           })
           .sort((a, b) => a.duration - b.duration);
@@ -294,13 +358,49 @@ function DriverNavigationPage() {
               ? similarRoutes.slice(0, 1)
               : mappedRoutes.slice(0, 1);
 
+        logDebug('computeRoutes:success', {
+          status,
+          routes: mappedRoutes,
+          trimmedRoutes,
+        });
         setRouteOptions(trimmedRoutes);
         setSelectedRouteIndex(trimmedRoutes[0]?.index ?? null);
+        setSelectedRoutePolyline(trimmedRoutes[0]?.polyline || '');
+        setSelectedRouteDuration(trimmedRoutes[0]?.duration || 0);
         setDirectionsResponse(result);
         setIsRouting(false);
       }
     );
-  }, [driverStart, destination]);
+  }, [driverStart, destination, logDebug]);
+
+  useEffect(() => {
+    if (
+      !isScheduleOpen ||
+      !isLoaded ||
+      !driverStart ||
+      isRouting ||
+      routeOptions.length > 0
+    ) {
+      return;
+    }
+
+    computeRoutes();
+  }, [
+    isScheduleOpen,
+    isLoaded,
+    driverStart,
+    isRouting,
+    routeOptions.length,
+    computeRoutes,
+  ]);
+
+  useEffect(() => {
+    if (!isLoaded || !driverStart) {
+      return;
+    }
+
+    computeRoutes();
+  }, [computeRoutes, driverStart, isLoaded]);
 
   const refreshScheduledTrips = useCallback(async () => {
     setTripsLoading(true);
@@ -347,6 +447,17 @@ function DriverNavigationPage() {
     setScheduleError('');
     setScheduleMessage('');
 
+    logDebug('schedule:start', {
+      driverStart,
+      scheduleForm,
+      selectedRouteIndex,
+      selectedRoute,
+      selectedRoutePolyline,
+      selectedRouteDuration,
+      directionsRoutes: directionsResponse?.routes?.length || 0,
+      routeError,
+    });
+
     if (!driverStart) {
       setScheduleError('Set a start location before scheduling.');
       return;
@@ -357,8 +468,37 @@ function DriverNavigationPage() {
       return;
     }
 
-    if (!selectedRoute?.polyline) {
-      setScheduleError('Pick a route option first.');
+    const resolvedRouteIndex =
+      selectedRoute?.index ?? selectedRouteIndex ?? 0;
+    const fallbackRoute = directionsResponse?.routes?.[resolvedRouteIndex];
+    const fallbackPolyline =
+      normalizePolyline(fallbackRoute?.overview_polyline) ||
+      encodeOverviewPath(fallbackRoute?.overview_path);
+    const resolvedPolyline =
+      selectedRoute?.polyline ||
+      selectedRoutePolyline ||
+      fallbackPolyline ||
+      '';
+    const resolvedDuration =
+      selectedRoute?.duration ||
+      selectedRouteDuration ||
+      fallbackRoute?.legs?.[0]?.duration?.value ||
+      0;
+
+    logDebug('schedule:resolved-route', {
+      resolvedRouteIndex,
+      resolvedPolylineLength: resolvedPolyline?.length || 0,
+      resolvedDuration,
+    });
+
+    if (!resolvedPolyline) {
+      logDebug('schedule:missing-polyline', {
+        routeError,
+        fallbackRoute,
+      });
+      setScheduleError(
+        routeError || 'Missing route data. Set a start location and try again.'
+      );
       return;
     }
 
@@ -369,7 +509,7 @@ function DriverNavigationPage() {
 
     const estimatedArrival = computeArrivalTime(
       scheduleForm.departureTime,
-      selectedRoute.duration
+      resolvedDuration
     );
 
     if (!estimatedArrival) {
@@ -398,7 +538,7 @@ function DriverNavigationPage() {
         destination: scheduleForm.destinationId,
         start_lat: driverStart.lat,
         start_lng: driverStart.lng,
-        polyline: selectedRoute.polyline,
+        polyline: resolvedPolyline,
         departure_time: new Date(scheduleForm.departureTime).toISOString(),
         estimated_arrival_time: estimatedArrival,
         total_seats: Number(scheduleForm.passengerCount),
@@ -421,9 +561,15 @@ function DriverNavigationPage() {
       setIsScheduling(false);
     }
   }, [
+    debugSchedule,
     driverStart,
     scheduleForm,
+    routeError,
     selectedRoute,
+    selectedRouteIndex,
+    directionsResponse,
+    selectedRoutePolyline,
+    selectedRouteDuration,
     refreshScheduledTrips,
   ]);
 
@@ -530,7 +676,7 @@ function DriverNavigationPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2.3fr)_minmax(280px,1fr)]">
-          <SurfaceCard className="p-4">
+          <SurfaceCard className="h-[640px] p-0">
             {driverStart && directionsResponse ? (
               <DriverRouteMap
                 driverStart={driverStart}
@@ -538,11 +684,11 @@ function DriverNavigationPage() {
                 directionsResponse={directionsResponse}
                 routeIndex={selectedRoute?.index ?? 0}
                 useDirectionsService={false}
-                mapContainerStyle={{ width: '100%', height: '640px' }}
+                mapContainerStyle={{ width: '100%', height: '100%' }}
               />
             ) : (
-              <div className="flex h-[640px] items-center justify-center text-sm text-[#6a5c4b]">
-                Schedule a drive and preview a route option to see it here.
+              <div className="flex h-full items-center justify-center text-sm text-[#6a5c4b]">
+                Set a start location to see your route here.
               </div>
             )}
           </SurfaceCard>
@@ -651,18 +797,26 @@ function DriverNavigationPage() {
                     </button>
                   ) : (
                     <div className="space-y-2">
-                      <input
-                        type="text"
-                        value={scheduleForm.startAddress}
-                        onChange={(event) =>
-                          setScheduleForm((prev) => ({
-                            ...prev,
-                            startAddress: event.target.value,
-                          }))
-                        }
-                        placeholder="Enter a start address"
-                        className="w-full rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
-                      />
+                      <label
+                        htmlFor="driver-start-address"
+                        className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                      >
+                        Start address
+                        <input
+                          id="driver-start-address"
+                          name="startAddress"
+                          type="text"
+                          value={scheduleForm.startAddress}
+                          onChange={(event) =>
+                            setScheduleForm((prev) => ({
+                              ...prev,
+                              startAddress: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter a start address"
+                          className="w-full rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
+                        />
+                      </label>
                       <button
                         type="button"
                         onClick={resolveAddressLocation}
@@ -679,9 +833,14 @@ function DriverNavigationPage() {
                   )}
                 </div>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                <label
+                  htmlFor="driver-destination"
+                  className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                >
                   Destination
                   <select
+                    id="driver-destination"
+                    name="destinationId"
                     value={scheduleForm.destinationId}
                     onChange={(event) =>
                       setScheduleForm((prev) => ({
@@ -699,9 +858,14 @@ function DriverNavigationPage() {
                   </select>
                 </label>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                <label
+                  htmlFor="driver-departure-time"
+                  className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                >
                   Departure time
                   <input
+                    id="driver-departure-time"
+                    name="departureTime"
                     type="datetime-local"
                     value={scheduleForm.departureTime}
                     onChange={(event) =>
@@ -714,9 +878,14 @@ function DriverNavigationPage() {
                   />
                 </label>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                <label
+                  htmlFor="driver-passenger-count"
+                  className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                >
                   Passengers
                   <input
+                    id="driver-passenger-count"
+                    name="passengerCount"
                     type="number"
                     min="1"
                     max="6"
@@ -739,16 +908,14 @@ function DriverNavigationPage() {
                       Route options
                     </p>
                     <p className="text-sm text-[#5d5044]">
-                      Choose one of the closest routes.
+                      Auto-populates once the start location is set.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={computeRoutes}
-                    className="rounded-2xl border border-[#c9b7a3] px-4 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
-                  >
-                    {isRouting ? 'Finding routes...' : 'Preview routes'}
-                  </button>
+                  {isRouting && (
+                    <span className="text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                      Finding routes...
+                    </span>
+                  )}
                 </div>
 
                 {routeError && (
@@ -763,11 +930,15 @@ function DriverNavigationPage() {
                       <button
                         key={route.index}
                         type="button"
-                        onClick={() => setSelectedRouteIndex(route.index)}
+                        onClick={() => {
+                          setSelectedRouteIndex(route.index);
+                          setSelectedRoutePolyline(route.polyline || '');
+                          setSelectedRouteDuration(route.duration || 0);
+                        }}
                         className={`w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
                           route.index === selectedRouteIndex
                             ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
-                            : 'border-[#c9b7a3] text-[#5b4b3a] hover:bg-[#f7efe6]'
+                          : 'border-[#c9b7a3] text-[#5b4b3a] hover:bg-[#f7efe6]'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -784,7 +955,7 @@ function DriverNavigationPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-[#6a5c4b]">
-                    No route options yet. Preview routes to continue.
+                    No route options yet. Set a start location to continue.
                   </p>
                 )}
 

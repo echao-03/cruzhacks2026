@@ -417,9 +417,14 @@ function RiderPage() {
             {isFilterOpen && (
               <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4 text-sm text-[#5d5044]">
                 <div className="grid gap-4">
-                  <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                  <label
+                    htmlFor="filter-walk-distance"
+                    className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                  >
                     Walking distance
                     <select
+                      id="filter-walk-distance"
+                      name="walkingDistance"
                       value={filters.walkingDistance}
                       onChange={handleFilterChange('walkingDistance')}
                       className="rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
@@ -431,9 +436,14 @@ function RiderPage() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                  <label
+                    htmlFor="filter-time-window"
+                    className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                  >
                     Time window
                     <select
+                      id="filter-time-window"
+                      name="timeWindow"
                       value={filters.timeWindow}
                       onChange={handleFilterChange('timeWindow')}
                       className="rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
@@ -445,9 +455,14 @@ function RiderPage() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                  <label
+                    htmlFor="filter-destination"
+                    className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]"
+                  >
                     Destination sorting
                     <select
+                      id="filter-destination"
+                      name="destination"
                       value={filters.destination}
                       onChange={handleFilterChange('destination')}
                       className="rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
@@ -488,15 +503,15 @@ function RiderPage() {
             </div>
           </SurfaceCard>
 
-          <SurfaceCard className="p-4">
+          <SurfaceCard className="h-[640px] p-0">
             {riderLocation && selectedDriver?.routePolyline ? (
               <RiderSelectionMap
                 riderLocation={riderLocation}
                 tripPolyline={selectedDriver.routePolyline}
-                mapContainerStyle={{ width: '100%', height: '640px' }}
+                mapContainerStyle={{ width: '100%', height: '100%' }}
               />
             ) : (
-              <div className="flex h-[640px] items-center justify-center text-sm text-[#6a5c4b]">
+              <div className="flex h-full items-center justify-center text-sm text-[#6a5c4b]">
                 Enable location and select a driver to view your pickup route.
               </div>
             )}

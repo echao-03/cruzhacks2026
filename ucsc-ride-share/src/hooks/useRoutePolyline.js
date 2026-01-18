@@ -18,7 +18,25 @@ function useRoutePolyline({ origin, destination, waypoints }) {
       },
       (result, status) => {
         if (status === 'OK') {
-          const points = result?.routes?.[0]?.overview_polyline?.points ?? '';
+          const route = result?.routes?.[0];
+          let points = '';
+
+          if (typeof route?.overview_polyline === 'string') {
+            points = route.overview_polyline;
+          } else if (typeof route?.overview_polyline?.points === 'string') {
+            points = route.overview_polyline.points;
+          }
+
+          if (
+            !points &&
+            route?.overview_path &&
+            window.google?.maps?.geometry?.encoding?.encodePath
+          ) {
+            points = window.google.maps.geometry.encoding.encodePath(
+              route.overview_path
+            );
+          }
+
           setPolyline(points);
         }
       }

@@ -81,6 +81,7 @@ function SignUp() {
             <input
               type="text"
               id="userName"
+              name="userName"
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -94,6 +95,7 @@ function SignUp() {
             <input
               type="text"
               id="fullName"
+              name="fullName"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -107,6 +109,7 @@ function SignUp() {
             <input
               type="email"
               id="ucscEmail"
+              name="ucscEmail"
               value={ucscEmail}
               onChange={(e) => setUcscEmail(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -120,6 +123,7 @@ function SignUp() {
             <input
               type="password"
               id="password"
+              name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -132,6 +136,7 @@ function SignUp() {
             </label>
             <select
               id="gender"
+              name="gender"
               value={gender}
               onChange={(e) => setGender(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -152,6 +157,7 @@ function SignUp() {
             <input
               type="number"
               id="age"
+              name="age"
               value={age}
               onChange={(e) => setAge(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -167,6 +173,7 @@ function SignUp() {
             <input
               type="text"
               id="carModel"
+              name="carModel"
               value={carModel}
               onChange={(e) => setCarModel(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -179,6 +186,7 @@ function SignUp() {
             <input
               type="text"
               id="carColor"
+              name="carColor"
               value={carColor}
               onChange={(e) => setCarColor(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -191,6 +199,7 @@ function SignUp() {
             <input
               type="text"
               id="licensePlate"
+              name="licensePlate"
               value={licensePlate}
               onChange={(e) => setLicensePlate(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
