@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/slug-ride-share/index.html"
+    }
+  ]
+}
