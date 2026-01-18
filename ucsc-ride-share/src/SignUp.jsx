@@ -15,8 +15,7 @@ function SignUp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [userName, setUserName] = useState('');
-  const authRedirectTo =
-    import.meta.env.VITE_AUTH_REDIRECT_URL || 'https://slugcruise.vercel.app/';
+  const authRedirectTo = 'https://slugcruise.vercel.app/';
   const inputClassName =
     'rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none';
   const labelClassName =
