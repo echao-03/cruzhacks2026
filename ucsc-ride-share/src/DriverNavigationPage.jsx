@@ -10,6 +10,7 @@ import { useProfile } from './hooks/useProfile';
 
 const libraries = ['geometry', 'places'];
 const driverStartStorageKey = 'slugrider.driverStart';
+const tripStartStorageKey = 'slugrider.tripStartTimes';
 
 const destinationOptions = [
   {
@@ -73,20 +74,6 @@ const formatTime = (value) => {
   return parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
-const formatDateTime = (value) => {
-  if (!value) {
-    return 'Not set';
-  }
-
-  const parsed = new Date(value);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Not set';
-  }
-
-  return parsed.toLocaleString([], { hour: 'numeric', minute: '2-digit' });
-};
-
 const computeArrivalTime = (departureTime, durationSeconds) => {
   if (!departureTime || !durationSeconds) {
     return '';
@@ -120,6 +107,7 @@ function DriverNavigationPage() {
   const { profile } = useProfile();
   const [driverId, setDriverId] = useState(null);
   const [driverStart, setDriverStart] = useState(null);
+  const [driverStartLabel, setDriverStartLabel] = useState('');
   const [scheduledTrips, setScheduledTrips] = useState([]);
   const [tripsLoading, setTripsLoading] = useState(false);
   const [tripsError, setTripsError] = useState('');
@@ -127,9 +115,11 @@ function DriverNavigationPage() {
   const [tripActionError, setTripActionError] = useState('');
   const [tripActionMessage, setTripActionMessage] = useState('');
   const [tripActionLoading, setTripActionLoading] = useState(false);
+  const [tripStartTimes, setTripStartTimes] = useState({});
   const [tripStops, setTripStops] = useState([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [stopsError, setStopsError] = useState('');
+  const [stopLabels, setStopLabels] = useState({});
 
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
@@ -153,6 +143,22 @@ function DriverNavigationPage() {
   const [isScheduling, setIsScheduling] = useState(false);
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+
+  const reverseGeocode = useCallback(
+    (lat, lng, onSuccess) => {
+      if (!isLoaded || !window.google?.maps?.Geocoder) {
+        return;
+      }
+
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === 'OK' && results?.[0]?.formatted_address) {
+          onSuccess(results[0].formatted_address);
+        }
+      });
+    },
+    [isLoaded]
+  );
 
   useEffect(() => {
     const stored = localStorage.getItem(driverStartStorageKey);
@@ -179,8 +185,43 @@ function DriverNavigationPage() {
       localStorage.setItem(driverStartStorageKey, JSON.stringify(driverStart));
     } else {
       localStorage.removeItem(driverStartStorageKey);
+      setDriverStartLabel('');
     }
   }, [driverStart]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(tripStartStorageKey);
+    if (!stored) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object') {
+        setTripStartTimes(parsed);
+      }
+    } catch (error) {
+      localStorage.removeItem(tripStartStorageKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    const keys = Object.keys(tripStartTimes);
+    if (keys.length === 0) {
+      localStorage.removeItem(tripStartStorageKey);
+      return;
+    }
+
+    localStorage.setItem(tripStartStorageKey, JSON.stringify(tripStartTimes));
+  }, [tripStartTimes]);
+
+  useEffect(() => {
+    if (!driverStart || driverStartLabel) {
+      return;
+    }
+
+    reverseGeocode(driverStart.lat, driverStart.lng, setDriverStartLabel);
+  }, [driverStart, driverStartLabel, reverseGeocode]);
 
   const destination = useMemo(
     () =>
@@ -224,17 +265,6 @@ function DriverNavigationPage() {
     [scheduleForm.departureTime, selectedRouteDuration]
   );
 
-  const scheduleSummary = useMemo(() => {
-    const destinationLabel =
-      destinationLabels[scheduleForm.destinationId] || 'Destination';
-
-    return {
-      destinationLabel,
-      departureTime: scheduleForm.departureTime,
-      passengerCount: scheduleForm.passengerCount,
-    };
-  }, [scheduleForm]);
-
   useEffect(() => {
     if (profile?.default_passengers) {
       const normalized = Number(profile.default_passengers);
@@ -254,30 +284,6 @@ function DriverNavigationPage() {
     }
   }, [profile]);
 
-  const googleMapsUrl = useMemo(() => {
-    if (!driverStart) {
-      return '';
-    }
-
-    return `https://www.google.com/maps/dir/?api=1&origin=${toFixedCoord(
-      driverStart.lat
-    )},${toFixedCoord(driverStart.lng)}&destination=${toFixedCoord(
-      destination.lat
-    )},${toFixedCoord(destination.lng)}&travelmode=driving`;
-  }, [driverStart, destination]);
-
-  const appleMapsUrl = useMemo(() => {
-    if (!driverStart) {
-      return '';
-    }
-
-    return `https://maps.apple.com/?saddr=${toFixedCoord(
-      driverStart.lat
-    )},${toFixedCoord(driverStart.lng)}&daddr=${toFixedCoord(
-      destination.lat
-    )},${toFixedCoord(destination.lng)}&dirflg=d`;
-  }, [driverStart, destination]);
-
   const resolveCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
       setRouteError('Geolocation is not supported in this browser.');
@@ -289,10 +295,12 @@ function DriverNavigationPage() {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setDriverStart({
+        const nextStart = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
-        });
+        };
+        setDriverStart(nextStart);
+        reverseGeocode(nextStart.lat, nextStart.lng, setDriverStartLabel);
         setIsLocating(false);
       },
       (error) => {
@@ -301,7 +309,7 @@ function DriverNavigationPage() {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, []);
+  }, [reverseGeocode]);
 
   const resolveAddressLocation = useCallback(async () => {
     if (!scheduleForm.startAddress.trim()) {
@@ -322,9 +330,11 @@ function DriverNavigationPage() {
       if (status === 'OK' && results?.[0]?.geometry?.location) {
         const location = results[0].geometry.location;
         setDriverStart({ lat: location.lat(), lng: location.lng() });
+        setDriverStartLabel(results[0].formatted_address || scheduleForm.startAddress);
       } else {
         setRouteError('Unable to find that address.');
         setDriverStart(null);
+        setDriverStartLabel('');
       }
       setIsGeocoding(false);
     });
@@ -359,6 +369,7 @@ function DriverNavigationPage() {
       if (!location) {
         setRouteError('Select a valid address from the suggestions.');
         setDriverStart(null);
+        setDriverStartLabel('');
         return;
       }
 
@@ -367,6 +378,7 @@ function DriverNavigationPage() {
         startAddress: place.formatted_address || prev.startAddress,
       }));
       setDriverStart({ lat: location.lat(), lng: location.lng() });
+      setDriverStartLabel(place.formatted_address || scheduleForm.startAddress);
       setRouteError('');
     });
 
@@ -586,6 +598,32 @@ function DriverNavigationPage() {
   }, [scheduledTrips, selectedTripId]);
 
   useEffect(() => {
+    setTripStartTimes((prev) => {
+      const prevKeys = Object.keys(prev);
+      if (prevKeys.length === 0) {
+        return prev;
+      }
+
+      const next = {};
+      scheduledTrips.forEach((trip) => {
+        if (prev[trip.id]) {
+          next[trip.id] = prev[trip.id];
+        }
+      });
+
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length &&
+        prevKeys.every((key) => next[key] === prev[key])
+      ) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, [scheduledTrips]);
+
+  useEffect(() => {
     setTripActionError('');
     setTripActionMessage('');
   }, [selectedTripId]);
@@ -628,6 +666,7 @@ function DriverNavigationPage() {
   useEffect(() => {
     if (!selectedTrip?.id) {
       setTripStops([]);
+      setStopLabels({});
       return;
     }
 
@@ -656,6 +695,33 @@ function DriverNavigationPage() {
     };
   }, [selectedTrip?.id, loadTripStops]);
 
+  useEffect(() => {
+    if (!isLoaded || tripStops.length === 0) {
+      return;
+    }
+
+    tripStops.forEach((stop) => {
+      if (!stop?.id || stopLabels[stop.id]) {
+        return;
+      }
+
+      const lat = Number(stop.pickup_lat);
+      const lng = Number(stop.pickup_lng);
+      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+        return;
+      }
+
+      reverseGeocode(lat, lng, (label) => {
+        setStopLabels((prev) => {
+          if (prev[stop.id]) {
+            return prev;
+          }
+          return { ...prev, [stop.id]: label };
+        });
+      });
+    });
+  }, [tripStops, stopLabels, reverseGeocode, isLoaded]);
+
   const handleStartTrip = useCallback(async () => {
     if (!selectedTrip) {
       return;
@@ -675,6 +741,10 @@ function DriverNavigationPage() {
         throw error;
       }
 
+      setTripStartTimes((prev) => ({
+        ...prev,
+        [selectedTrip.id]: new Date().toISOString(),
+      }));
       setTripActionMessage('Ride started. Riders can no longer book this trip.');
       refreshScheduledTrips();
     } catch (err) {
@@ -712,6 +782,14 @@ function DriverNavigationPage() {
         throw error;
       }
 
+      setTripStartTimes((prev) => {
+        if (!prev[selectedTrip.id]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[selectedTrip.id];
+        return next;
+      });
       setTripActionMessage('Ride ended.');
       setSelectedTripId(null);
       refreshScheduledTrips();
@@ -750,6 +828,14 @@ function DriverNavigationPage() {
         throw error;
       }
 
+      setTripStartTimes((prev) => {
+        if (!prev[selectedTrip.id]) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[selectedTrip.id];
+        return next;
+      });
       setTripActionMessage('Ride canceled.');
       setSelectedTripId(null);
       refreshScheduledTrips();
@@ -906,6 +992,9 @@ function DriverNavigationPage() {
         trip.status === 'IN_PROGRESS'
           ? 'In progress'
           : `Departs ${formatTime(trip.departure_time)}`,
+      arrivalTime: trip.estimated_arrival_time
+        ? formatTime(trip.estimated_arrival_time)
+        : '',
       availableSeats: Math.max(trip.total_seats - (trip.seats_taken || 0), 0),
       totalSeats: trip.total_seats || 0,
     }));
@@ -928,6 +1017,17 @@ function DriverNavigationPage() {
       ) || null
     );
   }, [selectedTrip]);
+
+  const driverStartDisplay = useMemo(() => {
+    if (!driverStart) {
+      return '';
+    }
+
+    return (
+      driverStartLabel ||
+      `${toFixedCoord(driverStart.lat)}, ${toFixedCoord(driverStart.lng)}`
+    );
+  }, [driverStart, driverStartLabel]);
 
   const selectedTripStops = useMemo(
     () =>
@@ -988,6 +1088,69 @@ function DriverNavigationPage() {
     )}&travelmode=driving${waypointsParam}`;
   }, [selectedTrip, selectedTripDestination, selectedTripWaypoints]);
 
+  const selectedTripStartTime = useMemo(() => {
+    if (!selectedTrip?.id) {
+      return '';
+    }
+
+    return typeof tripStartTimes[selectedTrip.id] === 'string'
+      ? tripStartTimes[selectedTrip.id]
+      : '';
+  }, [selectedTrip, tripStartTimes]);
+
+  const selectedTripDurationSeconds = useMemo(() => {
+    if (!selectedTrip?.departure_time || !selectedTrip?.estimated_arrival_time) {
+      return 0;
+    }
+
+    const depart = new Date(selectedTrip.departure_time);
+    const arrival = new Date(selectedTrip.estimated_arrival_time);
+
+    if (Number.isNaN(depart.getTime()) || Number.isNaN(arrival.getTime())) {
+      return 0;
+    }
+
+    const seconds = Math.round((arrival.getTime() - depart.getTime()) / 1000);
+    return seconds > 0 ? seconds : 0;
+  }, [selectedTrip]);
+
+  const selectedTripEtaTime = useMemo(() => {
+    if (!selectedTripStartTime || !selectedTripDurationSeconds) {
+      return '';
+    }
+
+    const started = new Date(selectedTripStartTime);
+    if (Number.isNaN(started.getTime())) {
+      return '';
+    }
+
+    return new Date(
+      started.getTime() + selectedTripDurationSeconds * 1000
+    ).toISOString();
+  }, [selectedTripStartTime, selectedTripDurationSeconds]);
+
+  const selectedTripEtaMessage = useMemo(() => {
+    if (!selectedTrip) {
+      return '';
+    }
+
+    if (selectedTrip.status === 'SCHEDULED') {
+      return 'Waiting for scheduled time before starting trip.';
+    }
+
+    if (selectedTrip.status === 'IN_PROGRESS') {
+      if (selectedTripEtaTime) {
+        return `Started ${formatTime(
+          selectedTripStartTime
+        )} · ETA ${formatTime(selectedTripEtaTime)}`;
+      }
+
+      return 'Ride started. ETA pending.';
+    }
+
+    return '';
+  }, [selectedTrip, selectedTripStartTime, selectedTripEtaTime]);
+
   const isTripStartDue = useMemo(() => {
     if (!selectedTrip?.departure_time || selectedTrip.status !== 'SCHEDULED') {
       return false;
@@ -1020,10 +1183,16 @@ function DriverNavigationPage() {
   return (
     <PageFrame width="full">
       <HeaderRow
-        title="Driver Navigation"
-        subtitle="Schedule a drive and share your route with riders."
+        title="Snag a Slug"
         action={
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsScheduleOpen(true)}
+              className="rounded-2xl bg-[#6e5a46] px-4 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
+            >
+              Schedule drive
+            </button>
             <Link
               to="/rider"
               className="rounded-2xl border border-[#c9b7a3] bg-[#f7f0e6] px-4 py-2 text-sm font-semibold text-[#5b4b3a] shadow-[0_12px_24px_rgba(68,54,41,0.18)] transition hover:bg-[#efe5d8]"
@@ -1036,71 +1205,6 @@ function DriverNavigationPage() {
       />
 
       <div className="mt-8 space-y-6">
-        <SurfaceCard className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
-              Current plan
-            </p>
-            <p className="text-sm font-semibold text-[#3a3128]">
-              {scheduleSummary.destinationLabel} · {formatDateTime(scheduleSummary.departureTime)}
-            </p>
-            {driverStart ? (
-              <p className="text-xs text-[#5a4e41]">
-                Start: {toFixedCoord(driverStart.lat)}, {toFixedCoord(driverStart.lng)}
-              </p>
-            ) : (
-              <p className="text-xs text-[#5a4e41]">Start: Not set</p>
-            )}
-            {!driverStart && (
-              <button
-                type="button"
-                onClick={resolveCurrentLocation}
-                disabled={isLocating}
-                className="inline-flex items-center rounded-full border border-[#c9b7a3] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[#5b4b3a] transition hover:bg-[#efe5d8] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isLocating ? 'Locating...' : 'Share location'}
-              </button>
-            )}
-            {selectedRoute?.durationText && (
-              <p className="text-xs text-[#5a4e41]">
-                ETA: {selectedRoute.durationText} · Arrive {formatTime(estimatedArrivalTime)}
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => setIsScheduleOpen(true)}
-              className="rounded-2xl bg-[#6e5a46] px-4 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
-            >
-              Schedule drive
-            </button>
-            <a
-              href={googleMapsUrl || '#'}
-              target="_blank"
-              rel="noreferrer"
-              className={`rounded-2xl border px-4 py-2 text-sm font-semibold ${
-                driverStart
-                  ? 'border-[#6a5a48] text-[#5b4b3a] transition hover:bg-[#efe5d8]'
-                  : 'cursor-not-allowed border-[#d8c9b9] text-[#b3a494]'
-              }`}
-            >
-              Open in Google Maps
-            </a>
-            <a
-              href={appleMapsUrl || '#'}
-              target="_blank"
-              rel="noreferrer"
-              className={`rounded-2xl bg-[#4f5b4a] px-4 py-2 text-sm font-semibold text-[#f3efe6] transition hover:bg-[#434d3d] ${
-                driverStart ? '' : 'pointer-events-none opacity-60'
-              }`}
-            >
-              Open in Apple Maps
-            </a>
-          </div>
-        </SurfaceCard>
-
         {(scheduleError || scheduleMessage) && (
           <SurfaceCard className="text-sm text-[#5a4e41]">
             {scheduleError && (
@@ -1160,55 +1264,60 @@ function DriverNavigationPage() {
                 {tripsLoading ? 'Refreshing...' : 'Refresh'}
               </button>
             </div>
-            <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
-              {tripsLoading && (
-                <p className="text-sm text-[#6a5c4b]">Loading trips...</p>
-              )}
-              {!tripsLoading && tripsError && (
-                <p className="text-sm text-[#9b3f2f]">{tripsError}</p>
-              )}
-              {!tripsLoading && !tripsError && scheduledTripCards.length === 0 && (
-                <p className="text-sm text-[#6a5c4b]">
-                  No scheduled trips yet.
-                </p>
-              )}
-              {!tripsLoading &&
-                !tripsError &&
-                scheduledTripCards.map((trip) => (
-                  <DriverCard
-                    key={trip.id}
-                    driver={trip}
-                    onSelect={() => setSelectedTripId(trip.id)}
-                    isSelected={trip.id === selectedTripId}
-                  />
-                ))}
-            </div>
+            {!selectedTrip && (
+              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
+                {tripsLoading && (
+                  <p className="text-sm text-[#6a5c4b]">Loading trips...</p>
+                )}
+                {!tripsLoading && tripsError && (
+                  <p className="text-sm text-[#9b3f2f]">{tripsError}</p>
+                )}
+                {!tripsLoading && !tripsError && scheduledTripCards.length === 0 && (
+                  <p className="text-sm text-[#6a5c4b]">
+                    No scheduled trips yet.
+                  </p>
+                )}
+                {!tripsLoading &&
+                  !tripsError &&
+                  scheduledTripCards.map((trip) => (
+                    <DriverCard
+                      key={trip.id}
+                      driver={trip}
+                      onSelect={() => setSelectedTripId(trip.id)}
+                      isSelected={trip.id === selectedTripId}
+                    />
+                  ))}
+              </div>
+            )}
             {selectedTrip && (
-              <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
+              <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4 relative">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTripId(null)}
+                  aria-label="Close selected trip"
+                  className="absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#c9b7a3] text-xs font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                >
+                  x
+                </button>
                 <div className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
+                  <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
+                    <div className="space-y-1.5">
                       <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
                         Selected trip
-                      </p>
-                      <p className="text-sm text-[#5d5044]">
-                        Departs {formatTime(selectedTrip.departure_time)} ·{' '}
-                        {destinationLabels[selectedTrip.destination] ||
-                          selectedTrip.destination}
                       </p>
                       {isTripStartDue && (
                         <p className="text-xs font-semibold text-[#9b3f2f]">
                           Departure time passed. Start the ride now.
                         </p>
                       )}
-                      {!isTripStartDue && selectedTrip.status === 'SCHEDULED' && (
-                        <p className="text-xs text-[#6a5c4b]">
-                          Start available at departure time.
-                        </p>
-                      )}
                       {selectedTrip.status !== 'SCHEDULED' && (
                         <p className="text-xs text-[#6a5c4b]">
                           Status: {selectedTrip.status}
+                        </p>
+                      )}
+                      {selectedTripEtaMessage && (
+                        <p className="text-xs text-[#5a4e41]">
+                          {selectedTripEtaMessage}
                         </p>
                       )}
                     </div>
@@ -1285,8 +1394,10 @@ function DriverNavigationPage() {
                           tripStops.map((stop, index) => (
                             <p key={stop.id} className="text-xs text-[#5a4e41]">
                               Stop {index + 1}:{' '}
-                              {toFixedCoord(stop.pickup_lat)},{' '}
-                              {toFixedCoord(stop.pickup_lng)}
+                              {stopLabels[stop.id] ||
+                                `${toFixedCoord(stop.pickup_lat)}, ${toFixedCoord(
+                                  stop.pickup_lng
+                                )}`}
                             </p>
                           ))
                         ) : (
@@ -1422,7 +1533,7 @@ function DriverNavigationPage() {
                   )}
                   {driverStart && (
                     <p className="text-xs text-[#5a4e41]">
-                      Selected: {toFixedCoord(driverStart.lat)}, {toFixedCoord(driverStart.lng)}
+                      Selected: {driverStartDisplay}
                     </p>
                   )}
                 </div>

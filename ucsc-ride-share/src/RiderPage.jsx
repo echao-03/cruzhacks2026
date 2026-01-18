@@ -3,17 +3,12 @@ import { useLoadScript } from '@react-google-maps/api';
 import { Link } from 'react-router-dom';
 import RiderSelectionMap from './RiderSelectionMap';
 import DriverCard from './components/DriverCard';
-import {
-  GlassCard,
-  HeaderRow,
-  PageFrame,
-  SurfaceCard,
-} from './components/ui';
+import { HeaderRow, PageFrame, SurfaceCard } from './components/ui';
 import ProfileMenu from './components/ProfileMenu';
 import { supabase } from './utils/supabase';
 import { useProfile } from './hooks/useProfile';
 
-const libraries = ['geometry'];
+const libraries = ['geometry', 'places'];
 const metersPerMinute = 80;
 const riderLocationStorageKey = 'slugrider.riderLocation';
 
@@ -237,11 +232,14 @@ function RiderPage() {
 
   const { profile } = useProfile();
   const [riderLocation, setRiderLocation] = useState(null);
+  const [riderLocationLabel, setRiderLocationLabel] = useState('');
   const [locationMode, setLocationMode] = useState('current');
   const [locationAddress, setLocationAddress] = useState('');
   const [locationError, setLocationError] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
+  const [meetingPointLabel, setMeetingPointLabel] = useState('');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [driversLoading, setDriversLoading] = useState(false);
   const [driversError, setDriversError] = useState('');
@@ -258,6 +256,24 @@ function RiderPage() {
   const [bookingError, setBookingError] = useState('');
   const [bookingLoading, setBookingLoading] = useState(false);
   const hasSetDefaultsRef = useRef(false);
+  const locationInputRef = useRef(null);
+  const locationAutocompleteRef = useRef(null);
+
+  const reverseGeocode = useCallback(
+    (lat, lng, onSuccess) => {
+      if (!isLoaded || !window.google?.maps?.Geocoder) {
+        return;
+      }
+
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === 'OK' && results?.[0]?.formatted_address) {
+          onSuccess(results[0].formatted_address);
+        }
+      });
+    },
+    [isLoaded]
+  );
 
   useEffect(() => {
     const stored = localStorage.getItem(riderLocationStorageKey);
@@ -287,8 +303,17 @@ function RiderPage() {
       );
     } else {
       localStorage.removeItem(riderLocationStorageKey);
+      setRiderLocationLabel('');
     }
   }, [riderLocation]);
+
+  useEffect(() => {
+    if (!riderLocation || riderLocationLabel) {
+      return;
+    }
+
+    reverseGeocode(riderLocation.lat, riderLocation.lng, setRiderLocationLabel);
+  }, [riderLocation, riderLocationLabel, reverseGeocode]);
 
   useEffect(() => {
     if (!profile || hasSetDefaultsRef.current) {
@@ -446,6 +471,10 @@ function RiderPage() {
             walkMetrics.distanceAlongRouteMeters
           )
         : '';
+      const meetingTimeText = meetingEta ? formatTime(meetingEta) : '';
+      const arrivalTimeText = trip.estimated_arrival_time
+        ? formatTime(trip.estimated_arrival_time)
+        : '';
       const arrivalMinutes = getMinutesUntil(
         meetingEta || trip.estimated_arrival_time
       );
@@ -457,9 +486,10 @@ function RiderPage() {
         id: trip.id,
         name: profileName,
         destination: destinationLabels[trip.destination] || trip.destination,
-        meetTime: walkMetrics?.meetingPoint
-          ? `Meet at ${formatTime(meetingEta)}`
-          : `Arrives ${formatTime(trip.estimated_arrival_time)}`,
+        meetTime: meetingTimeText
+          ? `Meet by ${meetingTimeText}`
+          : 'Meet time pending',
+        arrivalTime: arrivalTimeText,
         availableSeats,
         totalSeats: trip.total_seats || availableSeats,
         routePolyline: trip.polyline || '',
@@ -585,11 +615,14 @@ function RiderPage() {
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setRiderLocation({
+        const nextLocation = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
-        });
+        };
+        setRiderLocation(nextLocation);
+        reverseGeocode(nextLocation.lat, nextLocation.lng, setRiderLocationLabel);
         setIsLocating(false);
+        setIsLocationPickerOpen(false);
       },
       (error) => {
         setLocationError(error.message || 'Unable to get current location.');
@@ -597,7 +630,7 @@ function RiderPage() {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, []);
+  }, [reverseGeocode]);
 
   const handleUseAddress = useCallback(() => {
     if (!locationAddress.trim()) {
@@ -618,13 +651,68 @@ function RiderPage() {
       if (status === 'OK' && results?.[0]?.geometry?.location) {
         const location = results[0].geometry.location;
         setRiderLocation({ lat: location.lat(), lng: location.lng() });
+        setRiderLocationLabel(results[0].formatted_address || locationAddress);
+        setIsLocationPickerOpen(false);
       } else {
         setLocationError('Unable to find that address.');
         setRiderLocation(null);
+        setRiderLocationLabel('');
       }
       setIsGeocoding(false);
     });
   }, [locationAddress]);
+
+  useEffect(() => {
+    if (!isLoaded || locationMode !== 'address' || !isLocationPickerOpen) {
+      if (locationAutocompleteRef.current && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(
+          locationAutocompleteRef.current
+        );
+      }
+      locationAutocompleteRef.current = null;
+      return;
+    }
+
+    if (!window.google?.maps?.places?.Autocomplete || !locationInputRef.current) {
+      return;
+    }
+
+    const autocomplete = new window.google.maps.places.Autocomplete(
+      locationInputRef.current,
+      {
+        fields: ['formatted_address', 'geometry'],
+      }
+    );
+
+    autocomplete.addListener('place_changed', () => {
+      const place = autocomplete.getPlace();
+      const location = place?.geometry?.location;
+
+      if (!location) {
+        setLocationError('Select a valid address from the suggestions.');
+        setRiderLocation(null);
+        setRiderLocationLabel('');
+        return;
+      }
+
+      const formattedAddress = place.formatted_address || locationAddress;
+      setLocationAddress(formattedAddress);
+      setRiderLocation({ lat: location.lat(), lng: location.lng() });
+      setRiderLocationLabel(formattedAddress);
+      setLocationError('');
+      setIsLocationPickerOpen(false);
+    });
+
+    locationAutocompleteRef.current = autocomplete;
+
+    return () => {
+      if (locationAutocompleteRef.current && window.google?.maps?.event) {
+        window.google.maps.event.clearInstanceListeners(
+          locationAutocompleteRef.current
+        );
+      }
+    };
+  }, [isLoaded, isLocationPickerOpen, locationMode, locationAddress]);
 
   const handleFilterChange = useCallback((key) => (event) => {
     setFilters((prev) => ({ ...prev, [key]: event.target.value }));
@@ -656,6 +744,20 @@ function RiderPage() {
   }, [activeBooking?.bookingId, loadDrivers]);
 
   const mapDriver = selectedDriver || activeBooking?.driver || null;
+  const hasRideSelection = Boolean(activeBooking || selectedDriver);
+
+  useEffect(() => {
+    if (!mapDriver?.meetingPoint) {
+      setMeetingPointLabel('');
+      return;
+    }
+
+    reverseGeocode(
+      mapDriver.meetingPoint.lat,
+      mapDriver.meetingPoint.lng,
+      setMeetingPointLabel
+    );
+  }, [mapDriver?.meetingPoint, reverseGeocode]);
 
   const handleBookRide = useCallback(async () => {
     setBookingError('');
@@ -804,10 +906,19 @@ function RiderPage() {
   return (
     <PageFrame width="full">
       <HeaderRow
-        title="Rider Pickup"
-        subtitle="Find a driver and walk to the closest pickup point."
+        title="Catch a Cruise"
         action={
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setLocationError('');
+                setIsLocationPickerOpen(true);
+              }}
+              className="rounded-2xl bg-[#6e5a46] px-4 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
+            >
+              Set pickup
+            </button>
             <Link
               to="/driver"
               className="rounded-2xl border border-[#c9b7a3] bg-[#f7f0e6] px-4 py-2 text-sm font-semibold text-[#5b4b3a] shadow-[0_12px_24px_rgba(68,54,41,0.18)] transition hover:bg-[#efe5d8]"
@@ -820,90 +931,23 @@ function RiderPage() {
       />
 
       <div className="mt-8 space-y-6">
-        <GlassCard className="flex flex-col gap-4 text-[#4b4034] md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[#7a6b59]">
-              Rider view
-            </p>
-            <h3 className="text-xl font-semibold text-[#3a3128]">
-              Walk-up pickup
-            </h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setLocationMode('current')}
-                className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
-                  locationMode === 'current'
-                    ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
-                    : 'border-[#c9b7a3] text-[#5b4b3a]'
-                }`}
-              >
-                Current
-              </button>
-              <button
-                type="button"
-                onClick={() => setLocationMode('address')}
-                className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
-                  locationMode === 'address'
-                    ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
-                    : 'border-[#c9b7a3] text-[#5b4b3a]'
-                }`}
-              >
-                Address
-              </button>
-            </div>
-            {locationMode === 'current' ? (
-              <button
-                type="button"
-                onClick={handleUseLocation}
-                className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
-              >
-                {isLocating ? 'Locating...' : 'Use my location'}
-              </button>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  value={locationAddress}
-                  onChange={(event) => setLocationAddress(event.target.value)}
-                  placeholder="Enter an address"
-                  className="w-56 rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleUseAddress}
-                  className="rounded-2xl border border-[#c9b7a3] px-3 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
-                >
-                  {isGeocoding ? 'Searching...' : 'Use this address'}
-                </button>
-              </div>
-            )}
-            {riderLocation && (
-              <span className="text-sm text-[#5a4e41]">
-                {riderLocation.lat.toFixed(5)}, {riderLocation.lng.toFixed(5)}
-              </span>
-            )}
-            {locationError && (
-              <span className="text-xs font-semibold text-[#9b3f2f]">
-                {locationError}
-              </span>
-            )}
-          </div>
-        </GlassCard>
-
         <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] lg:items-start">
           <SurfaceCard className="flex h-[640px] flex-col">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
-                  Available drivers
-                </p>
-                <p className="text-lg font-semibold text-[#3a3128]">
-                  Choose a ride
-                </p>
-              </div>
+            <div
+              className={`flex items-center gap-3 ${
+                hasRideSelection ? 'justify-end' : 'justify-between'
+              }`}
+            >
+              {!hasRideSelection && (
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
+                    Available drivers
+                  </p>
+                  <p className="text-lg font-semibold text-[#3a3128]">
+                    Choose a ride
+                  </p>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -913,17 +957,19 @@ function RiderPage() {
                 >
                   {driversLoading ? 'Refreshing...' : 'Refresh'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsFilterOpen((prev) => !prev)}
-                  className="rounded-2xl border border-[#c9b7a3] px-4 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
-                >
-                  {isFilterOpen ? 'Hide Filters' : 'Filters'}
-                </button>
+                {!hasRideSelection && (
+                  <button
+                    type="button"
+                    onClick={() => setIsFilterOpen((prev) => !prev)}
+                    className="rounded-2xl border border-[#c9b7a3] px-4 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                  >
+                    {isFilterOpen ? 'Hide Filters' : 'Filters'}
+                  </button>
+                )}
               </div>
             </div>
 
-            {isFilterOpen && (
+            {isFilterOpen && !hasRideSelection && (
               <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4 text-sm text-[#5d5044]">
                 <div className="grid gap-4">
                   <label
@@ -987,35 +1033,37 @@ function RiderPage() {
               </div>
             )}
 
-            <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
-              {driversLoading && (
-                <p className="text-sm text-[#6a5c4b]">Loading drivers...</p>
-              )}
-              {!driversLoading && driversError && (
-                <p className="text-sm text-[#9b3f2f]">{driversError}</p>
-              )}
-              {!driversLoading && !driversError && filteredDrivers.length === 0 && (
-                <p className="text-sm text-[#6a5c4b]">
-                  No drivers available yet.
-                </p>
-              )}
-              {!driversLoading &&
-                !driversError &&
-                filteredDrivers.map((driver) => (
-                  <DriverCard
-                    key={driver.id}
-                    driver={driver}
-                    onSelect={() => setSelectedDriverId(driver.id)}
-                    isSelected={driver.id === selectedDriverId}
-                  />
-                ))}
-            </div>
+            {!hasRideSelection && (
+              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
+                {driversLoading && (
+                  <p className="text-sm text-[#6a5c4b]">Loading drivers...</p>
+                )}
+                {!driversLoading && driversError && (
+                  <p className="text-sm text-[#9b3f2f]">{driversError}</p>
+                )}
+                {!driversLoading && !driversError && filteredDrivers.length === 0 && (
+                  <p className="text-sm text-[#6a5c4b]">
+                    No drivers available yet.
+                  </p>
+                )}
+                {!driversLoading &&
+                  !driversError &&
+                  filteredDrivers.map((driver) => (
+                    <DriverCard
+                      key={driver.id}
+                      driver={driver}
+                      onSelect={() => setSelectedDriverId(driver.id)}
+                      isSelected={driver.id === selectedDriverId}
+                    />
+                  ))}
+              </div>
+            )}
 
             {(activeBooking || selectedDriver) && (
-              <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
+              <div className="relative mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
                 {activeBooking ? (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-between gap-3 pr-8">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
                           Ride reserved
@@ -1026,8 +1074,10 @@ function RiderPage() {
                         </p>
                         {activeBooking.meetingPoint && (
                           <p className="text-xs text-[#756856]">
-                            {activeBooking.meetingPoint.lat.toFixed(5)},{' '}
-                            {activeBooking.meetingPoint.lng.toFixed(5)}
+                            {meetingPointLabel ||
+                              `${activeBooking.meetingPoint.lat.toFixed(
+                                5
+                              )}, ${activeBooking.meetingPoint.lng.toFixed(5)}`}
                           </p>
                         )}
                       </div>
@@ -1053,7 +1103,15 @@ function RiderPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center justify-between gap-3 pr-8">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDriverId(null)}
+                        aria-label="Close selected driver"
+                        className="absolute right-3 top-3 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#c9b7a3] text-[10px] font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                      >
+                        x
+                      </button>
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
                           Selected driver
@@ -1065,24 +1123,28 @@ function RiderPage() {
                         </p>
                         {selectedDriver?.meetingPoint && (
                           <p className="text-xs text-[#756856]">
-                            {selectedDriver.meetingPoint.lat.toFixed(5)},{' '}
-                            {selectedDriver.meetingPoint.lng.toFixed(5)}
+                            {meetingPointLabel ||
+                              `${selectedDriver.meetingPoint.lat.toFixed(
+                                5
+                              )}, ${selectedDriver.meetingPoint.lng.toFixed(5)}`}
                           </p>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleBookRide}
-                        disabled={
-                          bookingLoading ||
-                          !selectedDriver ||
-                          !riderLocation ||
-                          !selectedDriver.meetingPoint
-                        }
-                        className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {bookingLoading ? 'Booking...' : 'Confirm ride'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleBookRide}
+                          disabled={
+                            bookingLoading ||
+                            !selectedDriver ||
+                            !riderLocation ||
+                            !selectedDriver.meetingPoint
+                          }
+                          className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {bookingLoading ? 'Booking...' : 'Confirm ride'}
+                        </button>
+                      </div>
                     </div>
                     {bookingError && (
                       <p className="text-xs font-semibold text-[#9b3f2f]">
@@ -1124,6 +1186,97 @@ function RiderPage() {
           </SurfaceCard>
         </div>
       </div>
+
+      {isLocationPickerOpen && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-6 py-8">
+          <SurfaceCard className="w-full max-w-2xl space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
+                  Pickup location
+                </p>
+                <p className="text-lg font-semibold text-[#3a3128]">
+                  Choose where you will be waiting.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsLocationPickerOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d7c5b1] text-xs font-semibold text-[#6a5c4b]"
+                aria-label="Close location picker"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLocationMode('current')}
+                  className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                    locationMode === 'current'
+                      ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
+                      : 'border-[#c9b7a3] text-[#5b4b3a]'
+                  }`}
+                >
+                  Your location
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocationMode('address')}
+                  className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                    locationMode === 'address'
+                      ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
+                      : 'border-[#c9b7a3] text-[#5b4b3a]'
+                  }`}
+                >
+                  Address
+                </button>
+              </div>
+
+              {locationMode === 'current' ? (
+                <button
+                  type="button"
+                  onClick={handleUseLocation}
+                  className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
+                >
+                  {isLocating ? 'Locating...' : 'Use my location'}
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    ref={locationInputRef}
+                    value={locationAddress}
+                    onChange={(event) => setLocationAddress(event.target.value)}
+                    placeholder="Search an address"
+                    className="w-72 rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUseAddress}
+                    className="rounded-2xl border border-[#c9b7a3] px-3 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                  >
+                    {isGeocoding ? 'Searching...' : 'Use this address'}
+                  </button>
+                </div>
+              )}
+
+              {riderLocation && (
+                <p className="text-xs text-[#5a4e41]">
+                  Location saved. You can update it anytime.
+                </p>
+              )}
+              {locationError && (
+                <p className="text-xs font-semibold text-[#9b3f2f]">
+                  {locationError}
+                </p>
+              )}
+            </div>
+          </SurfaceCard>
+        </div>
+      )}
     </PageFrame>
   );
 }

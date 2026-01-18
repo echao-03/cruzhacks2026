@@ -60,14 +60,20 @@ function DriverCard({ driver, onSelect, isSelected, actionLabel }) {
       tabIndex={isInteractive ? 0 : undefined}
     >
       <div className="flex items-center justify-between gap-4">
-        <div>
+        <div className="space-y-0.5">
           <p className="text-sm font-semibold text-[#3b3127]">
             {driver.name}
           </p>
-          <p className="text-xs text-[#6a5c4b]">
-            {driver.destination} / {driver.meetTime}
-          </p>
-          {driver.walkMinutes !== null && (
+          <p className="text-xs text-[#6a5c4b]">{driver.destination}</p>
+          {driver.meetTime && (
+            <p className="text-xs text-[#6a5c4b]">{driver.meetTime}</p>
+          )}
+          {driver.arrivalTime && (
+            <p className="text-xs text-[#6a5c4b]">
+              Arrive {driver.arrivalTime}
+            </p>
+          )}
+          {Number.isFinite(driver.walkMinutes) && (
             <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-[#756856]">
               Walk {driver.walkMinutes} min
               {typeof driver.walkDistanceMeters === 'number'
