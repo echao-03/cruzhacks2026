@@ -6,6 +6,7 @@ import {
   Polyline,
   Marker,
 } from '@react-google-maps/api';
+import slugPin from './static/banananslug.png';
 
 const defaultMapContainerStyle = {
   width: '100%',
@@ -88,6 +89,19 @@ function DriverRouteMap({
     () => (directionsPanel ? { panel: directionsPanel } : undefined),
     [directionsPanel]
   );
+  const slugIcon = useMemo(() => {
+    if (!window.google?.maps) {
+      return undefined;
+    }
+
+    const size = 40;
+
+    return {
+      url: slugPin,
+      scaledSize: new window.google.maps.Size(size, size),
+      anchor: new window.google.maps.Point(size / 2, size),
+    };
+  }, []);
 
   return (
     <GoogleMap mapContainerStyle={mapContainerStyle} center={mapCenter} zoom={13}>
@@ -98,13 +112,14 @@ function DriverRouteMap({
           options={{ strokeColor: '#1e66ff', strokeOpacity: 1, strokeWeight: 4 }}
         />
       )}
-      {driverStart && <Marker position={driverStart} />}
-      {destination && <Marker position={destination} />}
+      {driverStart && <Marker position={driverStart} icon={slugIcon} />}
+      {destination && <Marker position={destination} icon={slugIcon} />}
       {(stops || []).map((stop, index) => (
         <Marker
           key={`${stop.lat}-${stop.lng}-${index}`}
           position={stop}
           label={`${index + 1}`}
+          icon={slugIcon}
         />
       ))}
       {!routePolyline &&

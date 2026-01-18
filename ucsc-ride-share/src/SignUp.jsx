@@ -100,12 +100,6 @@ function SignUp() {
           />
           <div className="flex flex-wrap gap-3">
             <Link
-              to="/"
-              className="rounded-full border border-[#4d4135] px-5 py-2 text-sm font-semibold text-[#4d4135] transition hover:bg-[#4d4135] hover:text-[#f5efe6]"
-            >
-              Back to Home
-            </Link>
-            <Link
               to="/login"
               className="rounded-full bg-[#6e5a46] px-5 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
             >

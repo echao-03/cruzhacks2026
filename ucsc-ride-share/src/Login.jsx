@@ -83,12 +83,6 @@ function Login() {
           />
           <div className="flex flex-wrap gap-3">
             <Link
-              to="/"
-              className="rounded-full border border-[#4d4135] px-5 py-2 text-sm font-semibold text-[#4d4135] transition hover:bg-[#4d4135] hover:text-[#f5efe6]"
-            >
-              Back to Home
-            </Link>
-            <Link
               to="/signup"
               className="rounded-full bg-[#6e5a46] px-5 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
             >
@@ -103,7 +97,7 @@ function Login() {
               Log in
             </p>
             <p className="text-sm text-[#5a4e41]">
-              Use your username or UCSC email to continue.
+              Use your UCSC email to continue.
             </p>
           </div>
           {error && (
@@ -113,7 +107,7 @@ function Login() {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <label htmlFor="username" className="flex flex-col gap-2">
-              <span className={labelClassName}>Username or Email</span>
+              <span className={labelClassName}>Email</span>
               <input
                 type="text"
                 id="username"
