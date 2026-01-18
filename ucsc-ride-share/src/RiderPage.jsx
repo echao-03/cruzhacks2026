@@ -11,6 +11,7 @@ import { useProfile } from './hooks/useProfile';
 const libraries = ['geometry', 'places'];
 const metersPerMinute = 80;
 const riderLocationStorageKey = 'slugrider.riderLocation';
+const tripStartGraceMs = 5 * 60 * 1000;
 
 const destinationOptions = [
   { id: 'ANY', label: 'Any destination' },
@@ -200,12 +201,7 @@ const computeMeetingEta = (
   routeDistanceMeters,
   meetingDistanceMeters
 ) => {
-  if (
-    !departureTime ||
-    !arrivalTime ||
-    !routeDistanceMeters ||
-    !meetingDistanceMeters
-  ) {
+  if (!departureTime || !arrivalTime || !routeDistanceMeters) {
     return '';
   }
 
@@ -221,7 +217,12 @@ const computeMeetingEta = (
     return arrive.toISOString();
   }
 
-  const ratio = clamp(meetingDistanceMeters / routeDistanceMeters, 0, 1);
+  const safeRoute = Math.max(routeDistanceMeters || 0, 1);
+  const safeMeeting = Math.min(
+    Math.max(meetingDistanceMeters || 0, 0),
+    safeRoute
+  );
+  const ratio = clamp(safeMeeting / safeRoute, 0, 1);
   return new Date(depart.getTime() + totalDurationMs * ratio).toISOString();
 };
 
@@ -245,6 +246,7 @@ function RiderPage() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [driversLoading, setDriversLoading] = useState(false);
   const [driversError, setDriversError] = useState('');
+  const [meetingEtaOverrides, setMeetingEtaOverrides] = useState({});
 
   const [filters, setFilters] = useState({
     walkingDistance: '10',
@@ -258,9 +260,22 @@ function RiderPage() {
   const [bookingError, setBookingError] = useState('');
   const [bookingLoading, setBookingLoading] = useState(false);
   const [startNotice, setStartNotice] = useState('');
+  const [tripStartOverrides, setTripStartOverrides] = useState({});
+  const [walkingEstimates, setWalkingEstimates] = useState({});
   const hasSetDefaultsRef = useRef(false);
   const locationInputRef = useRef(null);
   const locationAutocompleteRef = useRef(null);
+  const lastAutocompletePredictionRef = useRef(null);
+  const defaultMapCenter = useMemo(
+    () => ({ lat: 36.9969, lng: -122.0552 }),
+    []
+  );
+  const riderLocationKey = useMemo(() => {
+    if (!riderLocation) {
+      return '';
+    }
+    return `${toFixedCoord(riderLocation.lat)},${toFixedCoord(riderLocation.lng)}`;
+  }, [riderLocation]);
 
   const reverseGeocode = useCallback(
     (lat, lng, onSuccess) => {
@@ -345,7 +360,7 @@ function RiderPage() {
       let query = supabase
         .from('trips')
         .select(
-          'id, driver_id, destination, polyline, departure_time, estimated_arrival_time, total_seats, seats_taken, status, profiles(full_name, username)'
+          'id, driver_id, destination, polyline, departure_time, estimated_arrival_time, total_seats, seats_taken, status, start_lat, start_lng, profiles(full_name, username)'
         )
         .eq('status', 'SCHEDULED');
 
@@ -469,22 +484,35 @@ function RiderPage() {
         return null;
       }
 
+      const startOverride = tripStartOverrides[trip.id];
+      let effectiveDeparture = startOverride || trip.departure_time || '';
+      let effectiveArrival = trip.estimated_arrival_time || '';
+
+      if (startOverride && trip.departure_time) {
+        const base = new Date(trip.departure_time);
+        const override = new Date(startOverride);
+        if (!Number.isNaN(base.getTime()) && !Number.isNaN(override.getTime())) {
+          const delta = override.getTime() - base.getTime();
+          const arrivalDate = new Date(effectiveArrival);
+          if (!Number.isNaN(arrivalDate.getTime())) {
+            effectiveArrival = new Date(arrivalDate.getTime() + delta).toISOString();
+          }
+          effectiveDeparture = override.toISOString();
+        }
+      }
+
       const walkMetrics = getWalkMetrics(riderLocation, trip.polyline);
       const meetingEta = walkMetrics?.meetingPoint
         ? computeMeetingEta(
-            trip.departure_time,
-            trip.estimated_arrival_time,
+            effectiveDeparture,
+            effectiveArrival,
             walkMetrics.routeDistanceMeters,
             walkMetrics.distanceAlongRouteMeters
           )
         : '';
       const meetingTimeText = meetingEta ? formatTime(meetingEta) : '';
-      const arrivalTimeText = trip.estimated_arrival_time
-        ? formatTime(trip.estimated_arrival_time)
-        : '';
-      const arrivalMinutes = getMinutesUntil(
-        meetingEta || trip.estimated_arrival_time
-      );
+      const arrivalTimeText = effectiveArrival ? formatTime(effectiveArrival) : '';
+      const arrivalMinutes = getMinutesUntil(meetingEta || effectiveArrival);
       const availableSeats = Math.max(
         trip.total_seats - (trip.seats_taken || 0),
         0
@@ -495,6 +523,8 @@ function RiderPage() {
       return {
         id: trip.id,
         name: profileName,
+        departure_time: effectiveDeparture,
+        estimated_arrival_time: effectiveArrival,
         destination: destinationLabels[trip.destination] || trip.destination,
         meetTime: meetingTimeText
           ? `Meet by ${meetingTimeText}`
@@ -511,18 +541,68 @@ function RiderPage() {
         distanceAlongRouteMeters: walkMetrics?.distanceAlongRouteMeters ?? null,
         arrivalMinutes,
         status: trip.status || 'SCHEDULED',
+        startLat: trip.start_lat ?? null,
+        startLng: trip.start_lng ?? null,
       };
     },
-    [riderLocation]
+    [riderLocation, tripStartOverrides]
   );
 
   const enrichedTrips = useMemo(
-    () => availableTrips.map(buildDriverSummary).filter(Boolean),
-    [availableTrips, buildDriverSummary]
+    () =>
+      availableTrips
+        .map((trip) => {
+          const base = buildDriverSummary(trip);
+          if (!base) {
+            return null;
+          }
+          const override = meetingEtaOverrides[trip.id];
+          return override ? { ...base, meetingEta: override } : base;
+        })
+        .filter(Boolean),
+    [availableTrips, buildDriverSummary, meetingEtaOverrides]
+  );
+
+  useEffect(() => {
+    setTripStartOverrides((prev) => {
+      let next = prev;
+      let changed = false;
+
+      enrichedTrips.forEach((trip) => {
+        if (trip.status === 'IN_PROGRESS' && !prev[trip.id]) {
+          next = next === prev ? { ...prev } : next;
+          next[trip.id] = new Date().toISOString();
+          changed = true;
+        } else if (trip.status !== 'IN_PROGRESS' && prev[trip.id]) {
+          next = next === prev ? { ...prev } : next;
+          delete next[trip.id];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [enrichedTrips]);
+
+  const tripsWithWalkingOverrides = useMemo(
+    () =>
+      enrichedTrips.map((trip) => {
+        const override = walkingEstimates[trip.id];
+        if (override && override.walkMinutes !== null) {
+          return {
+            ...trip,
+            walkMinutes: override.walkMinutes,
+            walkDistanceMeters:
+              override.walkDistanceMeters ?? trip.walkDistanceMeters,
+          };
+        }
+        return trip;
+      }),
+    [enrichedTrips, walkingEstimates]
   );
 
   const filteredDrivers = useMemo(() => {
-    return enrichedTrips
+    return tripsWithWalkingOverrides
       .filter((driver) => {
         if (
           filters.walkingDistance &&
@@ -551,7 +631,7 @@ function RiderPage() {
         }
         return a.arrivalMinutes - b.arrivalMinutes;
       });
-  }, [enrichedTrips, filters]);
+  }, [tripsWithWalkingOverrides, filters]);
 
   const selectedDriver = useMemo(() => {
     const fromList =
@@ -567,6 +647,101 @@ function RiderPage() {
 
     return null;
   }, [filteredDrivers, selectedDriverId, activeBooking]);
+
+  useEffect(() => {
+    setWalkingEstimates({});
+  }, [riderLocationKey]);
+
+  useEffect(() => {
+    const tripId = activeBooking?.tripId;
+    const status = activeBooking?.driver?.status;
+    if (!tripId) {
+      return;
+    }
+
+    setTripStartOverrides((prev) => {
+      if (status === 'IN_PROGRESS' && !prev[tripId]) {
+        return { ...prev, [tripId]: new Date().toISOString() };
+      }
+      if (status !== 'IN_PROGRESS' && prev[tripId]) {
+        const next = { ...prev };
+        delete next[tripId];
+        return next;
+      }
+      return prev;
+    });
+  }, [activeBooking?.tripId, activeBooking?.driver?.status]);
+
+  useEffect(() => {
+    if (
+      !isLoaded ||
+      !riderLocation ||
+      !window.google?.maps?.DirectionsService ||
+      !window.google?.maps?.TravelMode
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const origin = riderLocation;
+    const originKey = riderLocationKey;
+    const service = new window.google.maps.DirectionsService();
+
+    filteredDrivers.forEach((driver) => {
+      if (!driver.meetingPoint) {
+        return;
+      }
+
+      if (walkingEstimates[driver.id]?.originKey === originKey) {
+        return;
+      }
+
+      service.route(
+        {
+          origin,
+          destination: driver.meetingPoint,
+          travelMode: window.google.maps.TravelMode.WALKING,
+        },
+        (result, status) => {
+          if (cancelled) {
+            return;
+          }
+
+          if (status === 'OK' && result?.routes?.[0]?.legs?.[0]) {
+            const leg = result.routes[0].legs[0];
+            const distance = leg.distance?.value ?? null;
+            const minutes = leg.duration
+              ? Math.max(Math.round(leg.duration.value / 60), 1)
+              : null;
+
+            setWalkingEstimates((prev) => {
+              if (prev[driver.id]?.originKey === originKey) {
+                return prev;
+              }
+              return {
+                ...prev,
+                [driver.id]: {
+                  originKey,
+                  walkDistanceMeters: distance,
+                  walkMinutes: minutes,
+                },
+              };
+            });
+          }
+        }
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    filteredDrivers,
+    isLoaded,
+    riderLocation,
+    riderLocationKey,
+    walkingEstimates,
+  ]);
 
   const refreshActiveTrip = useCallback(
     async (tripId) => {
@@ -661,7 +836,9 @@ function RiderPage() {
   useEffect(() => {
     if (activeBooking?.driver?.status === 'IN_PROGRESS') {
       setStartNotice((prev) =>
-        prev ? prev : 'Your driver has started the ride. Head to your pickup point.'
+        prev
+          ? prev
+          : 'Your driver has departed. Head to your pickup point; times are adjusted.'
       );
     } else if (!activeBooking) {
       setStartNotice('');
@@ -673,7 +850,7 @@ function RiderPage() {
       return;
     }
 
-    const updated = enrichedTrips.find(
+    const updated = tripsWithWalkingOverrides.find(
       (trip) => trip.id === activeBooking.tripId
     );
 
@@ -695,7 +872,62 @@ function RiderPage() {
         walkDistanceMeters: updated.walkDistanceMeters,
       };
     });
-  }, [activeBooking?.tripId, enrichedTrips]);
+  }, [activeBooking?.tripId, tripsWithWalkingOverrides]);
+
+  useEffect(() => {
+    if (!activeBooking?.tripId) {
+      return;
+    }
+
+    const startOverride = tripStartOverrides[activeBooking.tripId];
+    if (!startOverride) {
+      return;
+    }
+
+    setActiveBooking((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const driver = prev.driver;
+      if (!driver) {
+        return prev;
+      }
+
+      const baseDeparture = driver.departure_time || '';
+      const baseArrival = driver.estimated_arrival_time || '';
+      const baseDepartureDate = new Date(baseDeparture);
+      const overrideDate = new Date(startOverride);
+      let effectiveArrival = baseArrival;
+
+      if (!Number.isNaN(baseDepartureDate.getTime()) && !Number.isNaN(overrideDate.getTime())) {
+        const delta = overrideDate.getTime() - baseDepartureDate.getTime();
+        const arrivalDate = new Date(baseArrival);
+        if (!Number.isNaN(arrivalDate.getTime())) {
+          effectiveArrival = new Date(arrivalDate.getTime() + delta).toISOString();
+        }
+      }
+
+      const meetingEta = driver.meetingPoint
+        ? computeMeetingEta(
+            startOverride,
+            effectiveArrival,
+            driver.routeDistanceMeters,
+            driver.distanceAlongRouteMeters
+          )
+        : prev.meetingEta;
+
+      return {
+        ...prev,
+        meetingEta: meetingEta || prev.meetingEta,
+        driver: {
+          ...driver,
+          departure_time: startOverride,
+          estimated_arrival_time: effectiveArrival,
+          meetingEta: meetingEta || driver.meetingEta,
+        },
+      };
+    });
+  }, [activeBooking?.tripId, tripStartOverrides]);
 
   useEffect(() => {
     if (filteredDrivers.length === 0) {
@@ -760,20 +992,109 @@ function RiderPage() {
     setIsGeocoding(true);
     setLocationError('');
 
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ address: locationAddress }, (results, status) => {
-      if (status === 'OK' && results?.[0]?.geometry?.location) {
-        const location = results[0].geometry.location;
+    const applyResult = (result, labelOverride) => {
+      const location = result?.geometry?.location;
+      if (location) {
+        const formatted =
+          labelOverride || result.formatted_address || locationAddress;
         setRiderLocation({ lat: location.lat(), lng: location.lng() });
-        setRiderLocationLabel(results[0].formatted_address || locationAddress);
+        setRiderLocationLabel(formatted);
         setIsLocationPickerOpen(false);
-      } else {
-        setLocationError('Unable to find that address.');
+        setIsGeocoding(false);
+        setLocationError('');
+        return true;
+      }
+      return false;
+    };
+
+    const usePrediction = (prediction) => {
+      if (!prediction) {
+        return false;
+      }
+
+      if (prediction.geometry?.location) {
+        return applyResult(prediction, prediction.formatted_address);
+      }
+
+      if (!prediction.place_id) {
+        return false;
+      }
+
+      if (!window.google?.maps?.places?.PlacesService) {
+        return false;
+      }
+
+      const placesService = new window.google.maps.places.PlacesService(
+        document.createElement('div')
+      );
+      placesService.getDetails(
+        { placeId: prediction.place_id, fields: ['geometry', 'formatted_address'] },
+        (placeResult, placeStatus) => {
+          if (placeStatus === 'OK' && applyResult(placeResult)) {
+            return;
+          }
+          setLocationError(
+            'Unable to find that address. Please pick from suggestions.'
+          );
+          setRiderLocation(null);
+          setRiderLocationLabel('');
+          setIsGeocoding(false);
+        }
+      );
+      return true;
+    };
+
+    if (usePrediction(lastAutocompletePredictionRef.current)) {
+      return;
+    }
+
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode(
+      {
+        address: locationAddress,
+        region: 'us',
+      },
+      (results, status) => {
+        if (status === 'OK' && results?.[0] && applyResult(results[0])) {
+          return;
+        }
+
+        if (window.google?.maps?.places?.AutocompleteService) {
+          const autoService = new window.google.maps.places.AutocompleteService();
+          autoService.getPlacePredictions(
+            {
+              input: locationAddress,
+              region: 'us',
+            },
+            (predictions, autoStatus) => {
+              if (
+                autoStatus === 'OK' &&
+                Array.isArray(predictions) &&
+                predictions.length > 0
+              ) {
+                lastAutocompletePredictionRef.current = predictions[0];
+                if (usePrediction(predictions[0])) {
+                  return;
+                }
+              }
+
+              setLocationError(
+                'Unable to find that address. Please pick from suggestions.'
+              );
+              setRiderLocation(null);
+              setRiderLocationLabel('');
+              setIsGeocoding(false);
+            }
+          );
+          return;
+        }
+
+        setLocationError('Unable to find that address. Please pick from suggestions.');
         setRiderLocation(null);
         setRiderLocationLabel('');
+        setIsGeocoding(false);
       }
-      setIsGeocoding(false);
-    });
+    );
   }, [locationAddress]);
 
   useEffect(() => {
@@ -794,7 +1115,7 @@ function RiderPage() {
     const autocomplete = new window.google.maps.places.Autocomplete(
       locationInputRef.current,
       {
-        fields: ['formatted_address', 'geometry'],
+        fields: ['formatted_address', 'geometry', 'place_id'],
       }
     );
 
@@ -809,6 +1130,7 @@ function RiderPage() {
         return;
       }
 
+      lastAutocompletePredictionRef.current = place;
       const formattedAddress = place.formatted_address || locationAddress;
       setLocationAddress(formattedAddress);
       setRiderLocation({ lat: location.lat(), lng: location.lng() });
@@ -826,7 +1148,7 @@ function RiderPage() {
         );
       }
     };
-  }, [isLoaded, isLocationPickerOpen, locationMode, locationAddress]);
+  }, [isLoaded, isLocationPickerOpen, locationMode]);
 
   const handleFilterChange = useCallback((key) => (event) => {
     setFilters((prev) => ({ ...prev, [key]: event.target.value }));
@@ -859,14 +1181,76 @@ function RiderPage() {
 
   const mapDriver = selectedDriver || activeBooking?.driver || null;
   const hasRideSelection = Boolean(activeBooking || selectedDriver);
-  const defaultMapCenter = useMemo(
-    () => ({ lat: 36.9969, lng: -122.0552 }),
-    []
-  );
   const riderMapContainerStyle = useMemo(
     () => ({ width: '100%', height: '100%', borderRadius: '24px' }),
     []
   );
+  useEffect(() => {
+    const fetchEta = async () => {
+      if (
+        !isLoaded ||
+        !mapDriver?.startLat ||
+        !mapDriver?.startLng ||
+        !mapDriver?.meetingPoint
+      ) {
+        return;
+      }
+
+      const origin = {
+        lat: Number(mapDriver.startLat),
+        lng: Number(mapDriver.startLng),
+      };
+      const destination = mapDriver.meetingPoint;
+
+      if (
+        Number.isNaN(origin.lat) ||
+        Number.isNaN(origin.lng) ||
+        Number.isNaN(destination.lat) ||
+        Number.isNaN(destination.lng)
+      ) {
+        return;
+      }
+
+      const departTime =
+        tripStartOverrides[mapDriver.id] || mapDriver.departure_time || '';
+
+      const service = new window.google.maps.DirectionsService();
+      service.route(
+        {
+          origin,
+          destination,
+          travelMode: window.google.maps.TravelMode.DRIVING,
+        },
+        (result, status) => {
+          if (
+            status === 'OK' &&
+            result?.routes?.[0]?.legs?.[0]?.duration?.value
+          ) {
+            const departDate = new Date(departTime);
+            if (Number.isNaN(departDate.getTime())) {
+              return;
+            }
+
+            const durationSeconds = result.routes[0].legs[0].duration.value;
+            const etaDate = new Date(
+              departDate.getTime() + durationSeconds * 1000
+            );
+
+            if (Number.isNaN(etaDate.getTime())) {
+              return;
+            }
+
+            setMeetingEtaOverrides((prev) => ({
+              ...prev,
+              [mapDriver.id]: etaDate.toISOString(),
+            }));
+          }
+        }
+      );
+    };
+
+    fetchEta();
+  }, [isLoaded, mapDriver, tripStartOverrides]);
   const riderMeetupMapsUrl = useMemo(() => {
     if (!mapDriver?.meetingPoint) {
       return '';
@@ -1068,7 +1452,7 @@ function RiderPage() {
       />
 
       <div className="mt-8 space-y-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] lg:items-start">
+        <div className="grid gap-6 lg:grid-cols-[minmax(340px,440px)_minmax(0,1.1fr)] lg:items-start">
           <SurfaceCard className="flex h-[700px] flex-col">
             <div
               className={`flex w-full items-start gap-3 ${
@@ -1406,6 +1790,12 @@ function RiderPage() {
                     ref={locationInputRef}
                     value={locationAddress}
                     onChange={(event) => setLocationAddress(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleUseAddress();
+                      }
+                    }}
                     placeholder="Search an address"
                     className="w-72 rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
                   />

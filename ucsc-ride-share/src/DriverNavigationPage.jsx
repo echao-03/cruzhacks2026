@@ -11,6 +11,7 @@ import { useProfile } from './hooks/useProfile';
 const libraries = ['geometry', 'places'];
 const driverStartStorageKey = 'slugrider.driverStart';
 const tripStartStorageKey = 'slugrider.tripStartTimes';
+const tripStartGraceMs = 5 * 60 * 1000;
 
 const destinationOptions = [
   {
@@ -156,10 +157,11 @@ function DriverNavigationPage() {
   const autocompleteRef = useRef(null);
   const departureWindow = useMemo(() => {
     const now = new Date();
-    const max = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const max = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+    const min = new Date(now.getTime() - tripStartGraceMs); // allow slight grace for “right now”
 
     return {
-      min: formatLocalDateTimeInput(now),
+      min: formatLocalDateTimeInput(min),
       max: formatLocalDateTimeInput(max),
     };
   }, []);
@@ -951,7 +953,7 @@ function DriverNavigationPage() {
     }
 
     if (!scheduleForm.departureTime) {
-      setScheduleError('Select a departure time within the next 24 hours.');
+      setScheduleError('Select a departure time within the next 25 hours.');
       return;
     }
 
@@ -962,12 +964,13 @@ function DriverNavigationPage() {
     }
 
     const now = Date.now();
-    const maxDeparture = now + 24 * 60 * 60 * 1000;
-    if (
-      departureDate.getTime() < now ||
-      departureDate.getTime() > maxDeparture
-    ) {
-      setScheduleError('Departure time must be within the next 24 hours.');
+    const maxDeparture = now + 25 * 60 * 60 * 1000;
+    if (departureDate.getTime() < now - tripStartGraceMs) {
+      setScheduleError('Departure time can be up to 5 minutes in the past.');
+      return;
+    }
+    if (departureDate.getTime() > maxDeparture) {
+      setScheduleError('Departure time must be within the next 25 hours.');
       return;
     }
 
@@ -1215,8 +1218,8 @@ function DriverNavigationPage() {
       return false;
     }
 
-    // Require scheduled time to have passed by at least 60 seconds
-    return depart.getTime() + 60_000 <= Date.now();
+    // Allow starting up to 5 minutes early or any time after scheduled departure
+    return depart.getTime() - tripStartGraceMs <= Date.now();
   }, [selectedTrip]);
 
   const defaultDriverMapCenter = useMemo(
@@ -1391,7 +1394,7 @@ function DriverNavigationPage() {
                       </p>
                       {isTripStartDue && (
                         <p className="text-xs font-semibold text-[#9b3f2f]">
-                          Departure time passed. Start the ride now.
+                          Within 5 minutes of departure. You can start the ride now.
                         </p>
                       )}
                       {selectedTripEtaMessage && (
