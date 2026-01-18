@@ -81,6 +81,7 @@ function SignUp() {
         );
         return;
       }
+      alert("Account created successfully! Please check your email for authentication.");
 
       // Optionally redirect to login
     } catch (err) {
