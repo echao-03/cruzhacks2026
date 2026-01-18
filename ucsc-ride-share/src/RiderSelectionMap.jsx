@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { GoogleMap, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
-import slugPin from './static/banananslug.png';
+import bananaSlug from './static/banananslug.png';
+import bananaFishSlug from './static/bananafiishslug.png';
 
 const defaultMapContainerStyle = {
   width: '100%',
@@ -109,17 +110,23 @@ function RiderSelectionMap({
     return getClosestPointOnPath(riderLocation, decodedPath);
   }, [meetingPoint, riderLocation, decodedPath]);
 
-  const slugIcon = useMemo(() => {
+  const iconSet = useMemo(() => {
     if (!window.google?.maps) {
-      return undefined;
+      return { start: undefined, end: undefined };
     }
 
     const size = 44;
-
     return {
-      url: slugPin,
-      scaledSize: new window.google.maps.Size(size, size),
-      anchor: new window.google.maps.Point(size / 2, size),
+      start: {
+        url: bananaSlug,
+        scaledSize: new window.google.maps.Size(size, size),
+        anchor: new window.google.maps.Point(size / 2, size),
+      },
+      end: {
+        url: bananaFishSlug,
+        scaledSize: new window.google.maps.Size(size, size),
+        anchor: new window.google.maps.Point(size / 2, size),
+      },
     };
   }, []);
 
@@ -129,6 +136,9 @@ function RiderSelectionMap({
     nearestPoint ||
     defaultCenter ||
     { lat: 0, lng: 0 };
+
+  const routeStart = decodedPath[0];
+  const routeEnd = decodedPath[decodedPath.length - 1];
 
   return (
     <GoogleMap
@@ -147,15 +157,23 @@ function RiderSelectionMap({
       {riderLocation && (
         <Marker
           position={riderLocation}
-          icon={slugIcon}
+          icon={iconSet.start}
         />
+      )}
+
+      {routeStart && (
+        <Marker position={routeStart} icon={iconSet.start} />
+      )}
+
+      {routeEnd && (
+        <Marker position={routeEnd} icon={iconSet.end} />
       )}
 
       {nearestPoint && (
         <>
           <Marker
             position={nearestPoint}
-            icon={slugIcon}
+            icon={iconSet.start}
           />
           <InfoWindow position={nearestPoint}>
             <div>

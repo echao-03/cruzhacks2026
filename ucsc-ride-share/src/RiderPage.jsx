@@ -257,6 +257,7 @@ function RiderPage() {
   const [activeBooking, setActiveBooking] = useState(null);
   const [bookingError, setBookingError] = useState('');
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [startNotice, setStartNotice] = useState('');
   const hasSetDefaultsRef = useRef(false);
   const locationInputRef = useRef(null);
   const locationAutocompleteRef = useRef(null);
@@ -462,8 +463,12 @@ function RiderPage() {
     };
   }, [activeBooking?.bookingId, loadDrivers]);
 
-  const enrichedTrips = useMemo(() => {
-    return availableTrips.map((trip) => {
+  const buildDriverSummary = useCallback(
+    (trip) => {
+      if (!trip) {
+        return null;
+      }
+
       const walkMetrics = getWalkMetrics(riderLocation, trip.polyline);
       const meetingEta = walkMetrics?.meetingPoint
         ? computeMeetingEta(
@@ -480,7 +485,10 @@ function RiderPage() {
       const arrivalMinutes = getMinutesUntil(
         meetingEta || trip.estimated_arrival_time
       );
-      const availableSeats = Math.max(trip.total_seats - (trip.seats_taken || 0), 0);
+      const availableSeats = Math.max(
+        trip.total_seats - (trip.seats_taken || 0),
+        0
+      );
       const profileName =
         trip.profiles?.full_name || trip.profiles?.username || 'Driver';
 
@@ -502,9 +510,16 @@ function RiderPage() {
         routeDistanceMeters: walkMetrics?.routeDistanceMeters ?? null,
         distanceAlongRouteMeters: walkMetrics?.distanceAlongRouteMeters ?? null,
         arrivalMinutes,
+        status: trip.status || 'SCHEDULED',
       };
-    });
-  }, [availableTrips, riderLocation]);
+    },
+    [riderLocation]
+  );
+
+  const enrichedTrips = useMemo(
+    () => availableTrips.map(buildDriverSummary).filter(Boolean),
+    [availableTrips, buildDriverSummary]
+  );
 
   const filteredDrivers = useMemo(() => {
     return enrichedTrips
@@ -553,6 +568,106 @@ function RiderPage() {
     return null;
   }, [filteredDrivers, selectedDriverId, activeBooking]);
 
+  const refreshActiveTrip = useCallback(
+    async (tripId) => {
+      if (!tripId) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('trips')
+        .select(
+          'id, driver_id, destination, polyline, departure_time, estimated_arrival_time, total_seats, seats_taken, status, profiles(full_name, username)'
+        )
+        .eq('id', tripId)
+        .maybeSingle();
+
+      if (error) {
+        return;
+      }
+
+      if (!data) {
+        setActiveBooking(null);
+        setSelectedDriverId(null);
+        setBookingError('Your ride is no longer available.');
+        return;
+      }
+
+      const updatedDriver = buildDriverSummary(data);
+      if (!updatedDriver) {
+        return;
+      }
+
+      setActiveBooking((prev) => {
+        if (!prev) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          driver: updatedDriver,
+          meetingPoint: updatedDriver.meetingPoint,
+          meetingEta: updatedDriver.meetingEta,
+          walkMinutes: updatedDriver.walkMinutes,
+          walkDistanceMeters: updatedDriver.walkDistanceMeters,
+        };
+      });
+    },
+    [buildDriverSummary]
+  );
+
+  useEffect(() => {
+    if (!activeBooking?.tripId) {
+      return undefined;
+    }
+
+    refreshActiveTrip(activeBooking.tripId);
+
+    const channel = supabase
+      .channel(`rider-trip-status:${activeBooking.tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'trips',
+          filter: `id=eq.${activeBooking.tripId}`,
+        },
+        () => {
+          refreshActiveTrip(activeBooking.tripId);
+        }
+      );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking?.tripId, refreshActiveTrip]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDrivers();
+      if (activeBooking?.tripId) {
+        refreshActiveTrip(activeBooking.tripId);
+      }
+    }, 25000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [loadDrivers, refreshActiveTrip, activeBooking?.tripId]);
+
+  useEffect(() => {
+    if (activeBooking?.driver?.status === 'IN_PROGRESS') {
+      setStartNotice((prev) =>
+        prev ? prev : 'Your driver has started the ride. Head to your pickup point.'
+      );
+    } else if (!activeBooking) {
+      setStartNotice('');
+    }
+  }, [activeBooking]);
+
   useEffect(() => {
     if (!activeBooking?.tripId) {
       return;
@@ -563,9 +678,6 @@ function RiderPage() {
     );
 
     if (!updated) {
-      setActiveBooking(null);
-      setSelectedDriverId(null);
-      setBookingError('Your ride is no longer available.');
       return;
     }
 
@@ -1137,6 +1249,19 @@ function RiderPage() {
                       isSelected
                       actionLabel="Reserved"
                     />
+                    {startNotice && (
+                      <div className="flex items-start gap-3 rounded-2xl border border-[#8b9a86] bg-[#e9f0e6] px-3 py-2 text-xs font-semibold text-[#4f5b4a]">
+                        <span>{startNotice}</span>
+                        <button
+                          type="button"
+                          onClick={() => setStartNotice('')}
+                          className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#c9b7a3] text-[10px] font-semibold text-[#5b4b3a] transition hover:bg-[#dfe8da]"
+                          aria-label="Dismiss notice"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">

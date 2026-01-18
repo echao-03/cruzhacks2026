@@ -873,6 +873,19 @@ function DriverNavigationPage() {
     }
   }, [refreshScheduledTrips, selectedTripId, loadTripStops]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshScheduledTrips();
+      if (selectedTripId) {
+        loadTripStops(selectedTripId);
+      }
+    }, 25000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [refreshScheduledTrips, selectedTripId, loadTripStops]);
+
   const handleScheduleDrive = useCallback(async () => {
     setScheduleError('');
     setScheduleMessage('');
@@ -1202,7 +1215,8 @@ function DriverNavigationPage() {
       return false;
     }
 
-    return depart.getTime() <= Date.now();
+    // Require scheduled time to have passed by at least 60 seconds
+    return depart.getTime() + 60_000 <= Date.now();
   }, [selectedTrip]);
 
   const defaultDriverMapCenter = useMemo(
@@ -1256,13 +1270,23 @@ function DriverNavigationPage() {
 
       <div className="mt-8 space-y-6">
         {(scheduleError || scheduleMessage) && (
-          <SurfaceCard className="text-sm text-[#5a4e41]">
+          <SurfaceCard className="relative text-sm text-[#5a4e41]">
             {scheduleError && (
               <p className="text-sm font-semibold text-[#9b3f2f]">
                 {scheduleError}
               </p>
             )}
             {scheduleMessage && <p>{scheduleMessage}</p>}
+            {scheduleMessage && (
+              <button
+                type="button"
+                onClick={() => setScheduleMessage('')}
+                className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#c9b7a3] text-[11px] font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            )}
           </SurfaceCard>
         )}
 
@@ -1368,11 +1392,6 @@ function DriverNavigationPage() {
                       {isTripStartDue && (
                         <p className="text-xs font-semibold text-[#9b3f2f]">
                           Departure time passed. Start the ride now.
-                        </p>
-                      )}
-                      {selectedTrip.status !== 'SCHEDULED' && (
-                        <p className="text-xs text-[#6a5c4b]">
-                          Status: {selectedTrip.status}
                         </p>
                       )}
                       {selectedTripEtaMessage && (
