@@ -37,6 +37,8 @@ const timeOptions = [
   { id: '30', label: 'Within 30 min' },
 ];
 
+const toFixedCoord = (value) => Number(value).toFixed(6);
+
 const formatTime = (value) => {
   if (!value) {
     return 'ASAP';
@@ -745,6 +747,29 @@ function RiderPage() {
 
   const mapDriver = selectedDriver || activeBooking?.driver || null;
   const hasRideSelection = Boolean(activeBooking || selectedDriver);
+  const defaultMapCenter = useMemo(
+    () => ({ lat: 36.9969, lng: -122.0552 }),
+    []
+  );
+  const riderMapContainerStyle = useMemo(
+    () => ({ width: '100%', height: '100%', borderRadius: '24px' }),
+    []
+  );
+  const riderMeetupMapsUrl = useMemo(() => {
+    if (!mapDriver?.meetingPoint) {
+      return '';
+    }
+
+    const destination = `${toFixedCoord(mapDriver.meetingPoint.lat)},${toFixedCoord(
+      mapDriver.meetingPoint.lng
+    )}`;
+    const origin = riderLocation
+      ? `${toFixedCoord(riderLocation.lat)},${toFixedCoord(riderLocation.lng)}`
+      : '';
+    const originParam = origin ? `&origin=${origin}` : '';
+
+    return `https://www.google.com/maps/dir/?api=1${originParam}&destination=${destination}&travelmode=walking`;
+  }, [mapDriver, riderLocation]);
 
   useEffect(() => {
     if (!mapDriver?.meetingPoint) {
@@ -931,10 +956,10 @@ function RiderPage() {
       />
 
       <div className="mt-8 space-y-6">
-        <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] lg:items-start">
-          <SurfaceCard className="flex h-[640px] flex-col">
+        <div className="grid gap-6 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] lg:items-start">
+          <SurfaceCard className="flex h-[700px] flex-col">
             <div
-              className={`flex items-center gap-3 ${
+              className={`flex w-full items-start gap-3 ${
                 hasRideSelection ? 'justify-end' : 'justify-between'
               }`}
             >
@@ -948,7 +973,7 @@ function RiderPage() {
                   </p>
                 </div>
               )}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleRefreshDrivers}
@@ -1034,7 +1059,7 @@ function RiderPage() {
             )}
 
             {!hasRideSelection && (
-              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
+              <div className="mt-4 flex-1 space-y-4 overflow-x-visible overflow-y-auto rounded-3xl bg-[#f7f0e6] px-5 pb-5 pt-5">
                 {driversLoading && (
                   <p className="text-sm text-[#6a5c4b]">Loading drivers...</p>
                 )}
@@ -1081,14 +1106,26 @@ function RiderPage() {
                           </p>
                         )}
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleCancelRide}
-                        disabled={bookingLoading}
-                        className="rounded-2xl border border-[#b45d4f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {bookingLoading ? 'Cancelling...' : 'Cancel ride'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        {riderMeetupMapsUrl && (
+                          <a
+                            href={riderMeetupMapsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-2xl border border-[#6a5a48] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                          >
+                            Open in Google Maps
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleCancelRide}
+                          disabled={bookingLoading}
+                          className="rounded-2xl border border-[#b45d4f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {bookingLoading ? 'Cancelling...' : 'Cancel ride'}
+                        </button>
+                      </div>
                     </div>
                     {bookingError && (
                       <p className="text-xs font-semibold text-[#9b3f2f]">
@@ -1103,7 +1140,7 @@ function RiderPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3 pr-8">
+                    <div className="flex items-center justify-end gap-3 pr-8">
                       <button
                         type="button"
                         onClick={() => setSelectedDriverId(null)}
@@ -1112,25 +1149,17 @@ function RiderPage() {
                       >
                         x
                       </button>
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
-                          Selected driver
-                        </p>
-                        <p className="text-sm text-[#5d5044]">
-                          {selectedDriver?.meetingEta
-                            ? `Meet by ${formatTime(selectedDriver.meetingEta)}`
-                            : 'Meet when the driver arrives'}
-                        </p>
-                        {selectedDriver?.meetingPoint && (
-                          <p className="text-xs text-[#756856]">
-                            {meetingPointLabel ||
-                              `${selectedDriver.meetingPoint.lat.toFixed(
-                                5
-                              )}, ${selectedDriver.meetingPoint.lng.toFixed(5)}`}
-                          </p>
-                        )}
-                      </div>
                       <div className="flex flex-wrap gap-2">
+                        {riderMeetupMapsUrl && (
+                          <a
+                            href={riderMeetupMapsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-2xl border border-[#6a5a48] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                          >
+                            Open in Google Maps
+                          </a>
+                        )}
                         <button
                           type="button"
                           onClick={handleBookRide}
@@ -1162,13 +1191,13 @@ function RiderPage() {
             )}
           </SurfaceCard>
 
-          <SurfaceCard className="h-[640px] p-0">
-            {riderLocation && mapDriver?.routePolyline ? (
+          <SurfaceCard className="h-[700px] overflow-hidden p-0">
+            <div className="relative h-full w-full">
               <RiderSelectionMap
-                key={mapDriver.id}
+                key={mapDriver?.id || 'rider-map'}
                 riderLocation={riderLocation}
-                tripPolyline={mapDriver.routePolyline}
-                meetingPoint={mapDriver.meetingPoint || activeBooking?.meetingPoint}
+                tripPolyline={mapDriver?.routePolyline || ''}
+                meetingPoint={mapDriver?.meetingPoint || activeBooking?.meetingPoint}
                 meetingEtaText={
                   mapDriver?.meetingEta
                     ? formatTime(mapDriver.meetingEta)
@@ -1176,13 +1205,15 @@ function RiderPage() {
                       ? formatTime(activeBooking.meetingEta)
                       : ''
                 }
-                mapContainerStyle={{ width: '100%', height: '100%' }}
+                defaultCenter={defaultMapCenter}
+                mapContainerStyle={riderMapContainerStyle}
               />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-[#6a5c4b]">
-                Enable location and select a driver to view your pickup route.
-              </div>
-            )}
+              {(!riderLocation || !mapDriver?.routePolyline) && (
+                <div className="absolute bottom-6 left-6 inline-flex w-fit max-w-[70%] rounded-2xl border border-[#d7c5b1] bg-[#f7f0e6]/95 px-4 py-3 text-xs font-semibold text-[#5b4b3a] shadow-[0_12px_20px_rgba(68,54,41,0.2)]">
+                  Set your pickup location and select a driver to see your route.
+                </div>
+              )}
+            </div>
           </SurfaceCard>
         </div>
       </div>
