@@ -74,6 +74,17 @@ const formatTime = (value) => {
   return parsed.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 };
 
+const formatLocalDateTimeInput = (value) => {
+  const pad = (num) => String(num).padStart(2, '0');
+  const year = value.getFullYear();
+  const month = pad(value.getMonth() + 1);
+  const day = pad(value.getDate());
+  const hours = pad(value.getHours());
+  const minutes = pad(value.getMinutes());
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 const computeArrivalTime = (departureTime, durationSeconds) => {
   if (!departureTime || !durationSeconds) {
     return '';
@@ -143,6 +154,15 @@ function DriverNavigationPage() {
   const [isScheduling, setIsScheduling] = useState(false);
   const addressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+  const departureWindow = useMemo(() => {
+    const now = new Date();
+    const max = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    return {
+      min: formatLocalDateTimeInput(now),
+      max: formatLocalDateTimeInput(max),
+    };
+  }, []);
 
   const reverseGeocode = useCallback(
     (lat, lng, onSuccess) => {
@@ -917,6 +937,27 @@ function DriverNavigationPage() {
       return;
     }
 
+    if (!scheduleForm.departureTime) {
+      setScheduleError('Select a departure time within the next 24 hours.');
+      return;
+    }
+
+    const departureDate = new Date(scheduleForm.departureTime);
+    if (Number.isNaN(departureDate.getTime())) {
+      setScheduleError('Select a valid departure time.');
+      return;
+    }
+
+    const now = Date.now();
+    const maxDeparture = now + 24 * 60 * 60 * 1000;
+    if (
+      departureDate.getTime() < now ||
+      departureDate.getTime() > maxDeparture
+    ) {
+      setScheduleError('Departure time must be within the next 24 hours.');
+      return;
+    }
+
     const estimatedArrival = computeArrivalTime(
       scheduleForm.departureTime,
       resolvedDuration
@@ -1164,6 +1205,15 @@ function DriverNavigationPage() {
     return depart.getTime() <= Date.now();
   }, [selectedTrip]);
 
+  const defaultDriverMapCenter = useMemo(
+    () => ({ lat: 36.9969, lng: -122.0552 }),
+    []
+  );
+  const driverMapContainerStyle = useMemo(
+    () => ({ width: '100%', height: '100%', borderRadius: '24px' }),
+    []
+  );
+
   if (!apiKey || loadError || !isLoaded) {
     const message = !apiKey
       ? 'Missing `VITE_GOOGLE_MAPS_API_KEY`.'
@@ -1217,36 +1267,46 @@ function DriverNavigationPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2.3fr)_minmax(280px,1fr)]">
-          <SurfaceCard className="h-[640px] p-0">
-            {selectedTrip && selectedTrip.polyline ? (
-              <DriverRouteMap
-                key={`trip-${selectedTrip.id}`}
-                driverStart={selectedTripStart}
-                destination={selectedTripDestination?.location}
-                routePolyline={selectedTrip.polyline}
-                stops={selectedTripStops}
-                useDirectionsService={false}
-                mapContainerStyle={{ width: '100%', height: '100%' }}
-              />
-            ) : isScheduleOpen && driverStart && directionsResponse ? (
-              <DriverRouteMap
-                key={`draft-${selectedRoute?.index ?? 'none'}`}
-                driverStart={driverStart}
-                destination={destination}
-                directionsResponse={directionsResponse}
-                routeIndex={selectedRoute?.index ?? 0}
-                useDirectionsService={false}
-                mapContainerStyle={{ width: '100%', height: '100%' }}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-[#6a5c4b]">
-                Select a scheduled trip to view its route.
-              </div>
-            )}
+          <SurfaceCard className="h-[700px] overflow-hidden p-0">
+            <div className="relative h-full w-full">
+              {selectedTrip && selectedTrip.polyline ? (
+                <DriverRouteMap
+                  key={`trip-${selectedTrip.id}`}
+                  driverStart={selectedTripStart}
+                  destination={selectedTripDestination?.location}
+                  routePolyline={selectedTrip.polyline}
+                  stops={selectedTripStops}
+                  useDirectionsService={false}
+                  mapContainerStyle={driverMapContainerStyle}
+                />
+              ) : isScheduleOpen && driverStart && directionsResponse ? (
+                <DriverRouteMap
+                  key={`draft-${selectedRoute?.index ?? 'none'}`}
+                  driverStart={driverStart}
+                  destination={destination}
+                  directionsResponse={directionsResponse}
+                  routeIndex={selectedRoute?.index ?? 0}
+                  useDirectionsService={false}
+                  mapContainerStyle={driverMapContainerStyle}
+                />
+              ) : (
+                <DriverRouteMap
+                  key="driver-map"
+                  defaultCenter={defaultDriverMapCenter}
+                  useDirectionsService={false}
+                  mapContainerStyle={driverMapContainerStyle}
+                />
+              )}
+              {!selectedTrip && !isScheduleOpen && (
+                <div className="absolute bottom-6 left-6 inline-flex w-fit max-w-[70%] rounded-2xl border border-[#d7c5b1] bg-[#f7f0e6]/95 px-4 py-3 text-xs font-semibold text-[#5b4b3a] shadow-[0_12px_20px_rgba(68,54,41,0.2)]">
+                  Select a scheduled trip or open Schedule drive to preview a route.
+                </div>
+              )}
+            </div>
           </SurfaceCard>
 
-          <SurfaceCard className="flex h-[640px] flex-col">
-            <div className="flex items-center justify-between">
+          <SurfaceCard className="flex h-[700px] flex-col">
+            <div className="flex w-full items-start justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
                   Scheduled trips
@@ -1265,7 +1325,7 @@ function DriverNavigationPage() {
               </button>
             </div>
             {!selectedTrip && (
-              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
+              <div className="mt-4 flex-1 space-y-4 overflow-x-visible overflow-y-auto rounded-3xl bg-[#f7f0e6] px-5 pb-5 pt-5">
                 {tripsLoading && (
                   <p className="text-sm text-[#6a5c4b]">Loading trips...</p>
                 )}
@@ -1573,6 +1633,8 @@ function DriverNavigationPage() {
                     name="departureTime"
                     type="datetime-local"
                     value={scheduleForm.departureTime}
+                    min={departureWindow.min}
+                    max={departureWindow.max}
                     onChange={(event) =>
                       setScheduleForm((prev) => ({
                         ...prev,

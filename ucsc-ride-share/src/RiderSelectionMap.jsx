@@ -83,6 +83,7 @@ function RiderSelectionMap({
   tripPolyline,
   meetingPoint,
   meetingEtaText,
+  defaultCenter,
   mapContainerStyle = defaultMapContainerStyle,
 }) {
   const decodedPath = useMemo(() => {
@@ -140,7 +141,11 @@ function RiderSelectionMap({
   }, []);
 
   const mapCenter =
-    riderLocation || decodedPath[0] || nearestPoint || { lat: 0, lng: 0 };
+    riderLocation ||
+    decodedPath[0] ||
+    nearestPoint ||
+    defaultCenter ||
+    { lat: 0, lng: 0 };
 
   return (
     <GoogleMap

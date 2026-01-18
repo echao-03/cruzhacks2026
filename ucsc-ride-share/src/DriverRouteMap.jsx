@@ -24,6 +24,7 @@ function DriverRouteMap({
   directionsResponse,
   routeIndex = 0,
   useDirectionsService = true,
+  defaultCenter,
 }) {
   const [directions, setDirections] = useState(null);
 
@@ -83,7 +84,11 @@ function DriverRouteMap({
   }, []);
 
   const mapCenter =
-    driverStart || decodedPath[0] || destination || { lat: 0, lng: 0 };
+    driverStart ||
+    decodedPath[0] ||
+    destination ||
+    defaultCenter ||
+    { lat: 0, lng: 0 };
   const rendererOptions = useMemo(
     () => (directionsPanel ? { panel: directionsPanel } : undefined),
     [directionsPanel]
