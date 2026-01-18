@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../utils/supabase';
 import { useProfile } from '../hooks/useProfile';
 import { ProfileButton, SurfaceCard } from './ui';
@@ -9,6 +10,7 @@ function ProfileMenu() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
   const wrapperRef = useRef(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -47,6 +49,8 @@ function ProfileMenu() {
       setSignOutError(error.message);
     } else {
       setIsOpen(false);
+      localStorage.removeItem('supabase_session');
+      navigate('/', { replace: true });
     }
 
     setIsSigningOut(false);

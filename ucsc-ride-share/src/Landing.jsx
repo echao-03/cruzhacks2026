@@ -1,55 +1,36 @@
 import { Link } from 'react-router-dom';
-import { GlassCard, PageFrame, PageHeader } from './components/ui';
+import { PageFrame } from './components/ui';
 
 function Landing() {
   return (
     <PageFrame>
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.7fr)] lg:items-center">
-        <div className="space-y-6">
-          <PageHeader
-            title="Carpooling, calm and coordinated."
-            subtitle="Preview driver and rider maps while we finish the flow."
-          />
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to="/signup"
-              className="rounded-full border border-[#4d4135] px-5 py-2 text-sm font-semibold text-[#4d4135] transition hover:bg-[#4d4135] hover:text-[#f5efe6]"
-            >
-              Sign In
-            </Link>
-            <Link
-              to="/login"
-              className="rounded-full bg-[#6e5a46] px-5 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
-            >
-              Log In
-            </Link>
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="w-full max-w-2xl text-center">
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <h1 className="text-6xl font-semibold text-[#3b3127] sm:text-6xl">
+                SlugCruise
+              </h1>
+              <p className="text-base text-[#5a4e41] sm:text-lg">
+                Drive a Slug, by a Slug
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-3">
+              <Link
+                to="/signup"
+                className="rounded-full border border-[#6a5a48] px-5 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+              >
+                Sign In
+              </Link>
+              <Link
+                to="/login"
+                className="rounded-full bg-[#5b6a54] px-5 py-2 text-sm font-semibold text-[#f3efe6] transition hover:bg-[#4b5a45]"
+              >
+                Log In
+              </Link>
+            </div>
           </div>
         </div>
-
-        <GlassCard className="space-y-5">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
-              Driver tools
-            </p>
-            <h2 className="text-xl font-semibold text-[#3d342a]">
-              Start navigation
-            </h2>
-          </div>
-          <div className="flex flex-col gap-3">
-            <Link
-              to="/driver"
-              className="rounded-2xl bg-[#4f5b4a] px-4 py-3 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
-            >
-              Go to Driver View
-            </Link>
-            <Link
-              to="/rider"
-              className="rounded-2xl border border-[#6a5a48] px-4 py-3 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
-            >
-              Go to Rider View
-            </Link>
-          </div>
-        </GlassCard>
       </div>
     </PageFrame>
   );

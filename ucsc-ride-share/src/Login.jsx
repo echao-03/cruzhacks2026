@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { PageFrame, PageHeader, SurfaceCard } from './components/ui';
 import { supabase } from './utils/supabase';
 
 function Login() {
@@ -8,6 +9,10 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const inputClassName =
+    'rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none';
+  const labelClassName =
+    'text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -52,7 +57,6 @@ function Login() {
         return;
       }
 
-      alert('Login successful!');
       localStorage.setItem('supabase_session', JSON.stringify(data.session));
       
       // Navigate to rider selection map with user data
@@ -70,54 +74,79 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded shadow-md w-full max-w-md">
-        <h2 className="text-2xl font-bold mb-6 text-center">Log In</h2>
-        {error && <p className="text-red-500 text-center mb-4">{error}</p>}
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="username">
-              Username
-            </label>
-            <input
-              type="text"
-              id="username"
-              name="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
+    <PageFrame>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] lg:items-center">
+        <div className="space-y-6">
+          <PageHeader
+            title="Welcome back to SlugCruise."
+            subtitle="Log in to reserve your ride or manage driver schedules."
+          />
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/"
+              className="rounded-full border border-[#4d4135] px-5 py-2 text-sm font-semibold text-[#4d4135] transition hover:bg-[#4d4135] hover:text-[#f5efe6]"
+            >
+              Back to Home
+            </Link>
+            <Link
+              to="/signup"
+              className="rounded-full bg-[#6e5a46] px-5 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
+            >
+              Create Account
+            </Link>
           </div>
-          <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
-              Password
-            </label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
+        </div>
+
+        <SurfaceCard className="space-y-6">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
+              Log in
+            </p>
+            <p className="text-sm text-[#5a4e41]">
+              Use your username or UCSC email to continue.
+            </p>
           </div>
-          <div className="flex items-center justify-between">
+          {error && (
+            <p className="rounded-2xl border border-[#e1b5ad] bg-[#f5d9d4] px-4 py-3 text-sm font-semibold text-[#9b3f2f]">
+              {error}
+            </p>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <label htmlFor="username" className="flex flex-col gap-2">
+              <span className={labelClassName}>Username or Email</span>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className={inputClassName}
+                required
+              />
+            </label>
+            <label htmlFor="password" className="flex flex-col gap-2">
+              <span className={labelClassName}>Password</span>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClassName}
+                required
+              />
+            </label>
             <button
               type="submit"
               disabled={loading}
-              className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+              className="w-full rounded-2xl bg-[#4f5b4a] px-4 py-3 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? 'Logging In...' : 'Log In'}
             </button>
-            <Link to="/" className="inline-block align-baseline font-bold text-sm text-blue-500 hover:text-blue-800">
-              Back to Home
-            </Link>
-          </div>
-        </form>
+          </form>
+        </SurfaceCard>
       </div>
-    </div>
+    </PageFrame>
   );
 }
 

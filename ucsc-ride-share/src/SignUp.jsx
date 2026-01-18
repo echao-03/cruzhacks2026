@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { PageFrame, PageHeader, SurfaceCard } from './components/ui';
 import { supabase } from './utils/supabase';
 
 function SignUp() {
@@ -14,6 +15,10 @@ function SignUp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [userName, setUserName] = useState('');
+  const inputClassName =
+    'rounded-2xl border border-[#c9b7a3] bg-[#f9f3ea] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none';
+  const labelClassName =
+    'text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,9 +26,15 @@ function SignUp() {
     setError('');
 
     try {
+      const normalizedEmail = ucscEmail.trim().toLowerCase();
+      if (!normalizedEmail.endsWith('.ucsc.edu')) {
+        setError('Please use your .ucsc.edu email address to sign up.');
+        return;
+      }
+
       // Sign up with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: ucscEmail,
+        email: normalizedEmail,
         username: userName,
         password,
         options: {
@@ -38,11 +49,20 @@ function SignUp() {
         return;
       }
 
+      const userId = authData?.user?.id;
+
+      if (!userId) {
+        setError(
+          'Sign-up succeeded, but no session is available yet. Please confirm your email and log in.'
+        );
+        return;
+      }
+
       // Insert profile data
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
-          id: authData.user.id,
+          id: userId,
           full_name: fullName,
           ucsc_email: ucscEmail,
           gender,
@@ -55,11 +75,13 @@ function SignUp() {
         });
 
       if (profileError) {
-        setError('Account created but profile setup failed. Please contact support.');
+        setError(
+          profileError.message ||
+            'Account created but profile setup failed. Please contact support.'
+        );
         return;
       }
 
-      alert('Sign up successful! Please check your email to confirm your account.');
       // Optionally redirect to login
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
@@ -69,157 +91,185 @@ function SignUp() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded shadow-md w-full max-w-md">
-        <h2 className="text-2xl font-bold mb-6 text-center">Sign Up</h2>
-        {error && <p className="text-red-500 text-center mb-4">{error}</p>}
-        <form onSubmit={handleSubmit}>
-            <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="userName">
-              Username
-            </label>
-            <input
-              type="text"
-              id="userName"
-              name="userName"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="fullName">
-              Full Name
-            </label>
-            <input
-              type="text"
-              id="fullName"
-              name="fullName"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="ucscEmail">
-              UCSC Email
-            </label>
-            <input
-              type="email"
-              id="ucscEmail"
-              name="ucscEmail"
-              value={ucscEmail}
-              onChange={(e) => setUcscEmail(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="password">
-              Password
-            </label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="gender">
-              Gender
-            </label>
-            <select
-              id="gender"
-              name="gender"
-              value={gender}
-              onChange={(e) => setGender(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
+    <PageFrame>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-start">
+        <div className="space-y-6">
+          <PageHeader
+            title="Create your SlugCruise profile."
+            subtitle="Set your ride preferences now and tweak them later."
+          />
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/"
+              className="rounded-full border border-[#4d4135] px-5 py-2 text-sm font-semibold text-[#4d4135] transition hover:bg-[#4d4135] hover:text-[#f5efe6]"
             >
-              <option value="">Select Gender</option>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-              <option value="Non-binary">Non-binary</option>
-              <option value="Other">Other</option>
-              <option value="Prefer not to say">Prefer not to say</option>
-            </select>
+              Back to Home
+            </Link>
+            <Link
+              to="/login"
+              className="rounded-full bg-[#6e5a46] px-5 py-2 text-sm font-semibold text-[#f7f0e6] transition hover:bg-[#5c4a39]"
+            >
+              Log In
+            </Link>
           </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="age">
-              Age
-            </label>
-            <input
-              type="number"
-              id="age"
-              name="age"
-              value={age}
-              onChange={(e) => setAge(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              required
-              min="18"
-              max="100"
-            />
+        </div>
+
+        <SurfaceCard className="space-y-6">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[#6f604f]">
+              Sign up
+            </p>
+            <p className="text-sm text-[#5a4e41]">
+              All fields required unless marked optional.
+            </p>
           </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="carModel">
-              Car Model (Optional)
-            </label>
-            <input
-              type="text"
-              id="carModel"
-              name="carModel"
-              value={carModel}
-              onChange={(e) => setCarModel(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="carColor">
-              Car Color (Optional)
-            </label>
-            <input
-              type="text"
-              id="carColor"
-              name="carColor"
-              value={carColor}
-              onChange={(e) => setCarColor(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="licensePlate">
-              License Plate (Optional)
-            </label>
-            <input
-              type="text"
-              id="licensePlate"
-              name="licensePlate"
-              value={licensePlate}
-              onChange={(e) => setLicensePlate(e.target.value)}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            />
-          </div>
-          <div className="flex items-center justify-between">
+          {error && (
+            <p className="rounded-2xl border border-[#e1b5ad] bg-[#f5d9d4] px-4 py-3 text-sm font-semibold text-[#9b3f2f]">
+              {error}
+            </p>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label htmlFor="userName" className="flex flex-col gap-2">
+                <span className={labelClassName}>Username</span>
+                <input
+                  type="text"
+                  id="userName"
+                  name="userName"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  className={inputClassName}
+                  required
+                />
+              </label>
+              <label htmlFor="fullName" className="flex flex-col gap-2">
+                <span className={labelClassName}>Full Name</span>
+                <input
+                  type="text"
+                  id="fullName"
+                  name="fullName"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className={inputClassName}
+                  required
+                />
+              </label>
+              <label htmlFor="ucscEmail" className="flex flex-col gap-2 sm:col-span-2">
+                <span className={labelClassName}>UCSC Email</span>
+                <input
+                  type="email"
+                  id="ucscEmail"
+                  name="ucscEmail"
+                  value={ucscEmail}
+                  onChange={(e) => setUcscEmail(e.target.value)}
+                  className={inputClassName}
+                  required
+                />
+              </label>
+              <label htmlFor="password" className="flex flex-col gap-2 sm:col-span-2">
+                <span className={labelClassName}>Password</span>
+                <input
+                  type="password"
+                  id="password"
+                  name="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClassName}
+                  required
+                />
+              </label>
+              <label htmlFor="gender" className="flex flex-col gap-2">
+                <span className={labelClassName}>Gender</span>
+                <select
+                  id="gender"
+                  name="gender"
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className={inputClassName}
+                  required
+                >
+                  <option value="">Select Gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Non-binary">Non-binary</option>
+                  <option value="Other">Other</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </label>
+              <label htmlFor="age" className="flex flex-col gap-2">
+                <span className={labelClassName}>Age</span>
+                <input
+                  type="number"
+                  id="age"
+                  name="age"
+                  value={age}
+                  onChange={(e) => setAge(e.target.value)}
+                  className={inputClassName}
+                  required
+                  min="18"
+                  max="100"
+                />
+              </label>
+            </div>
+
+            <div className="space-y-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-[#6f604f]">
+                  Driver details
+                </p>
+                <p className="text-xs text-[#6a5c4b]">Optional information for drivers.</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label htmlFor="carModel" className="flex flex-col gap-2">
+                  <span className={labelClassName}>Car Model</span>
+                  <input
+                    type="text"
+                    id="carModel"
+                    name="carModel"
+                    value={carModel}
+                    onChange={(e) => setCarModel(e.target.value)}
+                    className={inputClassName}
+                  />
+                </label>
+                <label htmlFor="carColor" className="flex flex-col gap-2">
+                  <span className={labelClassName}>Car Color</span>
+                  <input
+                    type="text"
+                    id="carColor"
+                    name="carColor"
+                    value={carColor}
+                    onChange={(e) => setCarColor(e.target.value)}
+                    className={inputClassName}
+                  />
+                </label>
+                <label
+                  htmlFor="licensePlate"
+                  className="flex flex-col gap-2 sm:col-span-2"
+                >
+                  <span className={labelClassName}>License Plate</span>
+                  <input
+                    type="text"
+                    id="licensePlate"
+                    name="licensePlate"
+                    value={licensePlate}
+                    onChange={(e) => setLicensePlate(e.target.value)}
+                    className={inputClassName}
+                  />
+                </label>
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
-              className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50"
+              className="w-full rounded-2xl bg-[#4f5b4a] px-4 py-3 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? 'Signing Up...' : 'Sign Up'}
             </button>
-            <Link to="/" className="inline-block align-baseline font-bold text-sm text-blue-500 hover:text-blue-800">
-              Back to Home
-            </Link>
-          </div>
-        </form>
+          </form>
+        </SurfaceCard>
       </div>
-    </div>
+    </PageFrame>
   );
 }
 
