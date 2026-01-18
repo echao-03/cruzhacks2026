@@ -92,6 +92,16 @@ async function handleBookRide({ riderLocation, driverPolyline, tripId, riderId }
     throw new Error('Unable to determine pickup point.');
   }
 
+  let walkingDistanceMeters = null;
+  if (window.google?.maps?.geometry?.spherical?.computeDistanceBetween) {
+    walkingDistanceMeters = Math.round(
+      window.google.maps.geometry.spherical.computeDistanceBetween(
+        new window.google.maps.LatLng(riderLocation.lat, riderLocation.lng),
+        new window.google.maps.LatLng(pickupPoint.lat, pickupPoint.lng)
+      )
+    );
+  }
+
   const resolvedRiderId = await resolveRiderId(riderId);
 
   if (!resolvedRiderId) {
@@ -105,6 +115,7 @@ async function handleBookRide({ riderLocation, driverPolyline, tripId, riderId }
       rider_id: resolvedRiderId,
       pickup_lat: pickupPoint.lat,
       pickup_lng: pickupPoint.lng,
+      walking_distance_meters: walkingDistanceMeters,
       status: 'CONFIRMED',
     })
     .select()

@@ -70,12 +70,13 @@ function HeaderRow({ title, subtitle, eyebrow, action, className }) {
   );
 }
 
-function ProfileButton({ label = 'Profile', initials = 'U' }) {
+function ProfileButton({ label = 'Profile', initials = 'U', ...props }) {
   return (
     <button
       type="button"
       className="flex items-center gap-3 rounded-full border border-[#d7c5b1] bg-[#fbf7f0] px-4 py-2 text-sm font-semibold text-[#3b3127] shadow-[0_12px_24px_rgba(68,54,41,0.18)] transition hover:bg-[#f1e6d9]"
       aria-label={label}
+      {...props}
     >
       <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#6f604f] text-xs font-semibold text-[#f7f1e8]">
         {initials}

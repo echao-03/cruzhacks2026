@@ -17,6 +17,9 @@ function DriverRouteMap({
   waypoints,
   mapContainerStyle = defaultMapContainerStyle,
   directionsPanel,
+  directionsResponse,
+  routeIndex = 0,
+  useDirectionsService = true,
 }) {
   const [directions, setDirections] = useState(null);
 
@@ -72,14 +75,17 @@ function DriverRouteMap({
 
   return (
     <GoogleMap mapContainerStyle={mapContainerStyle} center={mapCenter} zoom={13}>
-      {driverStart && destination && (
+      {useDirectionsService && !directionsResponse && driverStart && destination && (
         <DirectionsService
           options={directionsOptions}
           callback={directionsCallback}
         />
       )}
-      {directions && (
-        <DirectionsRenderer directions={directions} options={rendererOptions} />
+      {(directionsResponse || directions) && (
+        <DirectionsRenderer
+          directions={directionsResponse || directions}
+          options={{ ...rendererOptions, routeIndex }}
+        />
       )}
     </GoogleMap>
   );
