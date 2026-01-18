@@ -3,6 +3,8 @@ import {
   GoogleMap,
   DirectionsService,
   DirectionsRenderer,
+  Polyline,
+  Marker,
 } from '@react-google-maps/api';
 
 const defaultMapContainerStyle = {
@@ -15,6 +17,8 @@ function DriverRouteMap({
   destination,
   bookings,
   waypoints,
+  routePolyline,
+  stops,
   mapContainerStyle = defaultMapContainerStyle,
   directionsPanel,
   directionsResponse,
@@ -22,6 +26,21 @@ function DriverRouteMap({
   useDirectionsService = true,
 }) {
   const [directions, setDirections] = useState(null);
+
+  const decodedPath = useMemo(() => {
+    if (
+      !routePolyline ||
+      !window.google?.maps?.geometry?.encoding?.decodePath
+    ) {
+      return [];
+    }
+
+    const path = window.google.maps.geometry.encoding.decodePath(routePolyline);
+    return path.map((point) => ({
+      lat: point.lat(),
+      lng: point.lng(),
+    }));
+  }, [routePolyline]);
 
   const resolvedWaypoints = useMemo(() => {
     if (waypoints && waypoints.length > 0) {
@@ -63,25 +82,41 @@ function DriverRouteMap({
     }
   }, []);
 
-  const mapCenter = driverStart || destination;
+  const mapCenter =
+    driverStart || decodedPath[0] || destination || { lat: 0, lng: 0 };
   const rendererOptions = useMemo(
     () => (directionsPanel ? { panel: directionsPanel } : undefined),
     [directionsPanel]
   );
 
-  if (!mapCenter) {
-    return null;
-  }
-
   return (
     <GoogleMap mapContainerStyle={mapContainerStyle} center={mapCenter} zoom={13}>
-      {useDirectionsService && !directionsResponse && driverStart && destination && (
-        <DirectionsService
-          options={directionsOptions}
-          callback={directionsCallback}
+      {decodedPath.length > 0 && (
+        <Polyline
+          path={decodedPath}
+          options={{ strokeColor: '#1e66ff', strokeOpacity: 1, strokeWeight: 4 }}
         />
       )}
-      {(directionsResponse || directions) && (
+      {driverStart && <Marker position={driverStart} />}
+      {destination && <Marker position={destination} />}
+      {(stops || []).map((stop, index) => (
+        <Marker
+          key={`${stop.lat}-${stop.lng}-${index}`}
+          position={stop}
+          label={`${index + 1}`}
+        />
+      ))}
+      {!routePolyline &&
+        useDirectionsService &&
+        !directionsResponse &&
+        driverStart &&
+        destination && (
+          <DirectionsService
+            options={directionsOptions}
+            callback={directionsCallback}
+          />
+        )}
+      {!routePolyline && (directionsResponse || directions) && (
         <DirectionsRenderer
           directions={directionsResponse || directions}
           options={{ ...rendererOptions, routeIndex }}

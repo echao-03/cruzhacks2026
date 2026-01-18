@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLoadScript } from '@react-google-maps/api';
+import { Link } from 'react-router-dom';
 import RiderSelectionMap from './RiderSelectionMap';
 import DriverCard from './components/DriverCard';
 import {
@@ -14,6 +15,7 @@ import { useProfile } from './hooks/useProfile';
 
 const libraries = ['geometry'];
 const metersPerMinute = 80;
+const riderLocationStorageKey = 'slugrider.riderLocation';
 
 const destinationOptions = [
   { id: 'ANY', label: 'Any destination' },
@@ -219,7 +221,7 @@ const computeMeetingEta = (
   }
 
   if (totalDurationMs <= 0) {
-    return arrival.toISOString();
+    return arrive.toISOString();
   }
 
   const ratio = clamp(meetingDistanceMeters / routeDistanceMeters, 0, 1);
@@ -253,6 +255,37 @@ function RiderPage() {
   const [bookingError, setBookingError] = useState('');
   const [bookingLoading, setBookingLoading] = useState(false);
   const hasSetDefaultsRef = useRef(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(riderLocationStorageKey);
+
+    if (!stored) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored);
+      if (
+        typeof parsed?.lat === 'number' &&
+        typeof parsed?.lng === 'number'
+      ) {
+        setRiderLocation({ lat: parsed.lat, lng: parsed.lng });
+      }
+    } catch (error) {
+      localStorage.removeItem(riderLocationStorageKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (riderLocation) {
+      localStorage.setItem(
+        riderLocationStorageKey,
+        JSON.stringify(riderLocation)
+      );
+    } else {
+      localStorage.removeItem(riderLocationStorageKey);
+    }
+  }, [riderLocation]);
 
   useEffect(() => {
     if (!profile || hasSetDefaultsRef.current) {
@@ -320,6 +353,84 @@ function RiderPage() {
       }
     };
   }, [loadDrivers]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('rider-trips')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'trips' },
+        () => {
+          loadDrivers();
+        }
+      );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadDrivers]);
+
+  useEffect(() => {
+    if (!activeBooking?.tripId) {
+      return undefined;
+    }
+
+    const channel = supabase
+      .channel(`rider-active-trip:${activeBooking.tripId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'trips',
+          filter: `id=eq.${activeBooking.tripId}`,
+        },
+        () => {
+          setActiveBooking(null);
+          setSelectedDriverId(null);
+          setBookingError('Your ride was cancelled by the driver.');
+          loadDrivers();
+        }
+      );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking?.tripId, loadDrivers]);
+
+  useEffect(() => {
+    if (!activeBooking?.bookingId) {
+      return undefined;
+    }
+
+    const channel = supabase
+      .channel(`rider-booking:${activeBooking.bookingId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'bookings',
+          filter: `id=eq.${activeBooking.bookingId}`,
+        },
+        () => {
+          setActiveBooking(null);
+          setSelectedDriverId(null);
+          setBookingError('Your seat was released.');
+          loadDrivers();
+        }
+      );
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking?.bookingId, loadDrivers]);
 
   const enrichedTrips = useMemo(() => {
     return availableTrips.map((trip) => {
@@ -420,7 +531,7 @@ function RiderPage() {
     );
 
     if (!stillAvailable && !activeBooking) {
-      setSelectedDriverId(filteredDrivers[0].id);
+      setSelectedDriverId(null);
     }
   }, [filteredDrivers, selectedDriverId, activeBooking]);
 
@@ -578,6 +689,7 @@ function RiderPage() {
         .eq('id', activeBooking.tripId);
 
       setActiveBooking(null);
+      setSelectedDriverId(null);
       loadDrivers();
     } catch (err) {
       setBookingError(err?.message || 'Unable to cancel your ride.');
@@ -607,7 +719,17 @@ function RiderPage() {
       <HeaderRow
         title="Rider Pickup"
         subtitle="Find a driver and walk to the closest pickup point."
-        action={<ProfileMenu />}
+        action={
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/driver"
+              className="rounded-2xl border border-[#c9b7a3] bg-[#f7f0e6] px-4 py-2 text-sm font-semibold text-[#5b4b3a] shadow-[0_12px_24px_rgba(68,54,41,0.18)] transition hover:bg-[#efe5d8]"
+            >
+              Switch to Driver
+            </Link>
+            <ProfileMenu />
+          </div>
+        }
       />
 
       <div className="mt-8 space-y-6">
@@ -749,94 +871,93 @@ function RiderPage() {
                 ))}
             </div>
 
-            <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
-              {activeBooking ? (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
-                        Ride reserved
-                      </p>
-                      <p className="text-sm text-[#5d5044]">
-                        Meet by {formatTime(activeBooking.meetingEta)} · Walk{' '}
-                        {activeBooking.walkMinutes ?? '—'} min
-                      </p>
-                      {activeBooking.meetingPoint && (
-                        <p className="text-xs text-[#756856]">
-                          {activeBooking.meetingPoint.lat.toFixed(5)},{' '}
-                          {activeBooking.meetingPoint.lng.toFixed(5)}
+            {(activeBooking || selectedDriver) && (
+              <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
+                {activeBooking ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
+                          Ride reserved
                         </p>
-                      )}
+                        <p className="text-sm text-[#5d5044]">
+                          Meet by {formatTime(activeBooking.meetingEta)} · Walk{' '}
+                          {activeBooking.walkMinutes ?? '—'} min
+                        </p>
+                        {activeBooking.meetingPoint && (
+                          <p className="text-xs text-[#756856]">
+                            {activeBooking.meetingPoint.lat.toFixed(5)},{' '}
+                            {activeBooking.meetingPoint.lng.toFixed(5)}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCancelRide}
+                        disabled={bookingLoading}
+                        className="rounded-2xl border border-[#b45d4f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {bookingLoading ? 'Cancelling...' : 'Cancel ride'}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleCancelRide}
-                      disabled={bookingLoading}
-                      className="rounded-2xl border border-[#b45d4f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {bookingLoading ? 'Cancelling...' : 'Cancel ride'}
-                    </button>
-                  </div>
-                  <DriverCard
-                    driver={activeBooking.driver}
-                    isSelected
-                    actionLabel="Reserved"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
-                        Selected driver
+                    {bookingError && (
+                      <p className="text-xs font-semibold text-[#9b3f2f]">
+                        {bookingError}
                       </p>
-                      <p className="text-sm text-[#5d5044]">
-                        {selectedDriver
-                          ? selectedDriver.meetingEta
+                    )}
+                    <DriverCard
+                      driver={activeBooking.driver}
+                      isSelected
+                      actionLabel="Reserved"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
+                          Selected driver
+                        </p>
+                        <p className="text-sm text-[#5d5044]">
+                          {selectedDriver?.meetingEta
                             ? `Meet by ${formatTime(selectedDriver.meetingEta)}`
-                            : 'Meet when the driver arrives'
-                          : 'Choose a driver to continue.'}
-                      </p>
-                      {selectedDriver?.meetingPoint && (
-                        <p className="text-xs text-[#756856]">
-                          {selectedDriver.meetingPoint.lat.toFixed(5)},{' '}
-                          {selectedDriver.meetingPoint.lng.toFixed(5)}
+                            : 'Meet when the driver arrives'}
                         </p>
-                      )}
+                        {selectedDriver?.meetingPoint && (
+                          <p className="text-xs text-[#756856]">
+                            {selectedDriver.meetingPoint.lat.toFixed(5)},{' '}
+                            {selectedDriver.meetingPoint.lng.toFixed(5)}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleBookRide}
+                        disabled={
+                          bookingLoading ||
+                          !selectedDriver ||
+                          !riderLocation ||
+                          !selectedDriver.meetingPoint
+                        }
+                        className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {bookingLoading ? 'Booking...' : 'Confirm ride'}
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleBookRide}
-                      disabled={
-                        bookingLoading ||
-                        !selectedDriver ||
-                        !riderLocation ||
-                        !selectedDriver.meetingPoint
-                      }
-                      className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {bookingLoading ? 'Booking...' : 'Confirm ride'}
-                    </button>
-                  </div>
-                  {bookingError && (
-                    <p className="text-xs font-semibold text-[#9b3f2f]">
-                      {bookingError}
-                    </p>
-                  )}
-                  {selectedDriver ? (
+                    {bookingError && (
+                      <p className="text-xs font-semibold text-[#9b3f2f]">
+                        {bookingError}
+                      </p>
+                    )}
                     <DriverCard
                       driver={selectedDriver}
                       isSelected
                       actionLabel="Selected"
                     />
-                  ) : (
-                    <p className="text-xs text-[#6a5c4b]">
-                      Select a driver above to reserve a seat.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            )}
           </SurfaceCard>
 
           <SurfaceCard className="h-[640px] p-0">
