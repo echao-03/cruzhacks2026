@@ -3,10 +3,16 @@ import { SurfaceCard } from './ui';
 function SeatCubes({ available = 0, total = 4 }) {
   const current = Number(available);
   const max = Number(total);
+  const clampedAvailable = Number.isNaN(current) ? 0 : Math.max(current, 0);
+  const clampedTotal = Number.isNaN(max) ? 0 : Math.max(max, 0);
+  const taken = Math.min(
+    Math.max(clampedTotal - clampedAvailable, 0),
+    clampedTotal
+  );
 
-  const cubes = Array.from({ length: max }, (_, index) => ({
+  const cubes = Array.from({ length: clampedTotal }, (_, index) => ({
     id: index,
-    filled: index < current,
+    filled: index < taken,
   }));
 
   return (
@@ -24,7 +30,7 @@ function SeatCubes({ available = 0, total = 4 }) {
         ))}
       </div>
       <span className="text-xs font-semibold text-[#6a5c4b]">
-        {current}/{max}
+        Available {clampedAvailable}/{clampedTotal}
       </span>
     </div>
   );

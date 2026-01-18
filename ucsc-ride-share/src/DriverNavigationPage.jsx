@@ -499,22 +499,27 @@ function DriverNavigationPage() {
     setTripsLoading(true);
     setTripsError('');
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    let currentDriverId = driverId;
 
-    if (userError) {
-      setTripsError(userError.message);
-      setTripsLoading(false);
-      return;
+    if (!currentDriverId) {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        setTripsError(userError.message);
+        setTripsLoading(false);
+        return null;
+      }
+
+      currentDriverId = userData?.user?.id;
+      if (currentDriverId) {
+        setDriverId(currentDriverId);
+      }
     }
-
-    const currentDriverId = userData?.user?.id;
 
     if (!currentDriverId) {
       setTripsLoading(false);
-      return;
+      return null;
     }
-
-    setDriverId(currentDriverId);
 
     const { data, error } = await supabase
       .from('trips')
@@ -532,7 +537,8 @@ function DriverNavigationPage() {
     }
 
     setTripsLoading(false);
-  }, []);
+    return data || [];
+  }, [driverId]);
 
   useEffect(() => {
     refreshScheduledTrips();
@@ -688,9 +694,18 @@ function DriverNavigationPage() {
     setTripActionLoading(true);
 
     try {
+      const { error: bookingsError } = await supabase
+        .from('bookings')
+        .delete()
+        .eq('trip_id', selectedTrip.id);
+
+      if (bookingsError) {
+        throw bookingsError;
+      }
+
       const { error } = await supabase
         .from('trips')
-        .update({ status: 'COMPLETED' })
+        .delete()
         .eq('id', selectedTrip.id);
 
       if (error) {
@@ -698,6 +713,7 @@ function DriverNavigationPage() {
       }
 
       setTripActionMessage('Ride ended.');
+      setSelectedTripId(null);
       refreshScheduledTrips();
     } catch (err) {
       setTripActionError(err?.message || 'Unable to end this ride.');
@@ -706,7 +722,7 @@ function DriverNavigationPage() {
     }
   }, [selectedTrip, refreshScheduledTrips]);
 
-  const handleDeleteTrip = useCallback(async () => {
+  const handleCancelTrip = useCallback(async () => {
     if (!selectedTrip) {
       return;
     }
@@ -734,15 +750,22 @@ function DriverNavigationPage() {
         throw error;
       }
 
-      setTripActionMessage('Ride deleted.');
+      setTripActionMessage('Ride canceled.');
       setSelectedTripId(null);
       refreshScheduledTrips();
     } catch (err) {
-      setTripActionError(err?.message || 'Unable to delete this ride.');
+      setTripActionError(err?.message || 'Unable to cancel this ride.');
     } finally {
       setTripActionLoading(false);
     }
   }, [selectedTrip, refreshScheduledTrips]);
+
+  const handleRefreshTrips = useCallback(async () => {
+    await refreshScheduledTrips();
+    if (selectedTripId) {
+      await loadTripStops(selectedTripId);
+    }
+  }, [refreshScheduledTrips, selectedTripId, loadTripStops]);
 
   const handleScheduleDrive = useCallback(async () => {
     setScheduleError('');
@@ -1093,6 +1116,7 @@ function DriverNavigationPage() {
           <SurfaceCard className="h-[640px] p-0">
             {selectedTrip && selectedTrip.polyline ? (
               <DriverRouteMap
+                key={`trip-${selectedTrip.id}`}
                 driverStart={selectedTripStart}
                 destination={selectedTripDestination?.location}
                 routePolyline={selectedTrip.polyline}
@@ -1102,6 +1126,7 @@ function DriverNavigationPage() {
               />
             ) : isScheduleOpen && driverStart && directionsResponse ? (
               <DriverRouteMap
+                key={`draft-${selectedRoute?.index ?? 'none'}`}
                 driverStart={driverStart}
                 destination={destination}
                 directionsResponse={directionsResponse}
@@ -1126,6 +1151,14 @@ function DriverNavigationPage() {
                   Your upcoming drives
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={handleRefreshTrips}
+                disabled={tripsLoading}
+                className="rounded-2xl border border-[#c9b7a3] px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#5b4b3a] transition hover:bg-[#efe5d8] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {tripsLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
             <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
               {tripsLoading && (
@@ -1190,37 +1223,37 @@ function DriverNavigationPage() {
                           Open in Google Maps
                         </a>
                       )}
-                      {selectedTrip.status === 'IN_PROGRESS' ? (
-                        <button
-                          type="button"
-                          onClick={handleEndTrip}
-                          disabled={tripActionLoading}
-                          className="rounded-2xl bg-[#4f5b4a] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {tripActionLoading ? 'Ending...' : 'End ride'}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={handleStartTrip}
-                          disabled={
-                            tripActionLoading ||
-                            !isTripStartDue ||
-                            selectedTrip.status !== 'SCHEDULED'
-                          }
-                          className="rounded-2xl bg-[#4f5b4a] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {tripActionLoading ? 'Starting...' : 'Start ride'}
-                        </button>
-                      )}
                       <button
                         type="button"
-                        onClick={handleDeleteTrip}
-                        disabled={tripActionLoading}
-                        className="rounded-2xl border border-[#b45d4f] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
+                        onClick={
+                          selectedTrip.status === 'IN_PROGRESS'
+                            ? handleEndTrip
+                            : handleStartTrip
+                        }
+                        disabled={
+                          tripActionLoading ||
+                          (selectedTrip.status === 'SCHEDULED' && !isTripStartDue)
+                        }
+                        className="rounded-2xl bg-[#4f5b4a] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {tripActionLoading ? 'Deleting...' : 'Delete ride'}
+                        {tripActionLoading
+                          ? selectedTrip.status === 'IN_PROGRESS'
+                            ? 'Ending...'
+                            : 'Starting...'
+                          : selectedTrip.status === 'IN_PROGRESS'
+                            ? 'End ride'
+                            : 'Start ride'}
                       </button>
+                      {selectedTrip.status === 'SCHEDULED' && (
+                        <button
+                          type="button"
+                          onClick={handleCancelTrip}
+                          disabled={tripActionLoading}
+                          className="rounded-2xl border border-[#b45d4f] px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {tripActionLoading ? 'Canceling...' : 'Cancel ride'}
+                        </button>
+                      )}
                     </div>
                   </div>
                   {selectedTripCard && (

@@ -93,6 +93,7 @@ function DriverRouteMap({
     <GoogleMap mapContainerStyle={mapContainerStyle} center={mapCenter} zoom={13}>
       {decodedPath.length > 0 && (
         <Polyline
+          key={`route-${routePolyline}`}
           path={decodedPath}
           options={{ strokeColor: '#1e66ff', strokeOpacity: 1, strokeWeight: 4 }}
         />

@@ -125,7 +125,11 @@ function RiderSelectionMap({
       zoom={14}
     >
       {decodedPath.length > 0 && (
-        <Polyline path={decodedPath} options={routePolylineOptions} />
+        <Polyline
+          key={`route-${tripPolyline}`}
+          path={decodedPath}
+          options={routePolylineOptions}
+        />
       )}
 
       {riderLocation && (
@@ -150,6 +154,7 @@ function RiderSelectionMap({
 
       {riderLocation && nearestPoint && (
         <Polyline
+          key={`walk-${riderLocation.lat}-${riderLocation.lng}-${nearestPoint.lat}-${nearestPoint.lng}`}
           path={[riderLocation, nearestPoint]}
           options={walkingPolylineOptions}
         />

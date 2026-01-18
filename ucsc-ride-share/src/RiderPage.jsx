@@ -237,8 +237,11 @@ function RiderPage() {
 
   const { profile } = useProfile();
   const [riderLocation, setRiderLocation] = useState(null);
+  const [locationMode, setLocationMode] = useState('current');
+  const [locationAddress, setLocationAddress] = useState('');
   const [locationError, setLocationError] = useState('');
   const [isLocating, setIsLocating] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [driversLoading, setDriversLoading] = useState(false);
   const [driversError, setDriversError] = useState('');
@@ -519,6 +522,38 @@ function RiderPage() {
   }, [filteredDrivers, selectedDriverId, activeBooking]);
 
   useEffect(() => {
+    if (!activeBooking?.tripId) {
+      return;
+    }
+
+    const updated = enrichedTrips.find(
+      (trip) => trip.id === activeBooking.tripId
+    );
+
+    if (!updated) {
+      setActiveBooking(null);
+      setSelectedDriverId(null);
+      setBookingError('Your ride is no longer available.');
+      return;
+    }
+
+    setActiveBooking((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        driver: updated,
+        meetingPoint: updated.meetingPoint,
+        meetingEta: updated.meetingEta,
+        walkMinutes: updated.walkMinutes,
+        walkDistanceMeters: updated.walkDistanceMeters,
+      };
+    });
+  }, [activeBooking?.tripId, enrichedTrips]);
+
+  useEffect(() => {
     if (filteredDrivers.length === 0) {
       if (!activeBooking) {
         setSelectedDriverId(null);
@@ -564,9 +599,61 @@ function RiderPage() {
     );
   }, []);
 
+  const handleUseAddress = useCallback(() => {
+    if (!locationAddress.trim()) {
+      setLocationError('Enter an address to continue.');
+      return;
+    }
+
+    if (!window.google?.maps?.Geocoder) {
+      setLocationError('Google Maps is not ready.');
+      return;
+    }
+
+    setIsGeocoding(true);
+    setLocationError('');
+
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ address: locationAddress }, (results, status) => {
+      if (status === 'OK' && results?.[0]?.geometry?.location) {
+        const location = results[0].geometry.location;
+        setRiderLocation({ lat: location.lat(), lng: location.lng() });
+      } else {
+        setLocationError('Unable to find that address.');
+        setRiderLocation(null);
+      }
+      setIsGeocoding(false);
+    });
+  }, [locationAddress]);
+
   const handleFilterChange = useCallback((key) => (event) => {
     setFilters((prev) => ({ ...prev, [key]: event.target.value }));
   }, []);
+
+  const handleRefreshDrivers = useCallback(async () => {
+    setBookingError('');
+    loadDrivers();
+
+    if (!activeBooking?.bookingId) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('id', activeBooking.bookingId);
+
+    if (error) {
+      setBookingError(error.message || 'Unable to refresh your booking.');
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setActiveBooking(null);
+      setSelectedDriverId(null);
+      setBookingError('Your ride is no longer available.');
+    }
+  }, [activeBooking?.bookingId, loadDrivers]);
 
   const mapDriver = selectedDriver || activeBooking?.driver || null;
 
@@ -743,13 +830,56 @@ function RiderPage() {
             </h3>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleUseLocation}
-              className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
-            >
-              {isLocating ? 'Locating...' : 'Use My Location'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLocationMode('current')}
+                className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                  locationMode === 'current'
+                    ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
+                    : 'border-[#c9b7a3] text-[#5b4b3a]'
+                }`}
+              >
+                Current
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocationMode('address')}
+                className={`rounded-2xl border px-3 py-2 text-xs font-semibold ${
+                  locationMode === 'address'
+                    ? 'border-[#7a5d46] bg-[#efe5d8] text-[#3b3127]'
+                    : 'border-[#c9b7a3] text-[#5b4b3a]'
+                }`}
+              >
+                Address
+              </button>
+            </div>
+            {locationMode === 'current' ? (
+              <button
+                type="button"
+                onClick={handleUseLocation}
+                className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-sm font-semibold text-[#f3efe6] shadow-[0_10px_20px_rgba(65,80,63,0.3)] transition hover:translate-y-[-1px] hover:bg-[#434d3d]"
+              >
+                {isLocating ? 'Locating...' : 'Use my location'}
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={locationAddress}
+                  onChange={(event) => setLocationAddress(event.target.value)}
+                  placeholder="Enter an address"
+                  className="w-56 rounded-2xl border border-[#c9b7a3] bg-[#f3ece3] px-4 py-2 text-sm font-semibold text-[#3a3128] focus:border-[#6f604f] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleUseAddress}
+                  className="rounded-2xl border border-[#c9b7a3] px-3 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                >
+                  {isGeocoding ? 'Searching...' : 'Use this address'}
+                </button>
+              </div>
+            )}
             {riderLocation && (
               <span className="text-sm text-[#5a4e41]">
                 {riderLocation.lat.toFixed(5)}, {riderLocation.lng.toFixed(5)}
@@ -774,13 +904,23 @@ function RiderPage() {
                   Choose a ride
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsFilterOpen((prev) => !prev)}
-                className="rounded-2xl border border-[#c9b7a3] px-4 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
-              >
-                {isFilterOpen ? 'Hide Filters' : 'Filters'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshDrivers}
+                  disabled={driversLoading}
+                  className="rounded-2xl border border-[#c9b7a3] px-3 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#5b4b3a] transition hover:bg-[#efe5d8] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {driversLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFilterOpen((prev) => !prev)}
+                  className="rounded-2xl border border-[#c9b7a3] px-4 py-2 text-sm font-semibold text-[#5b4b3a] transition hover:bg-[#efe5d8]"
+                >
+                  {isFilterOpen ? 'Hide Filters' : 'Filters'}
+                </button>
+              </div>
             </div>
 
             {isFilterOpen && (
@@ -963,6 +1103,7 @@ function RiderPage() {
           <SurfaceCard className="h-[640px] p-0">
             {riderLocation && mapDriver?.routePolyline ? (
               <RiderSelectionMap
+                key={mapDriver.id}
                 riderLocation={riderLocation}
                 tripPolyline={mapDriver.routePolyline}
                 meetingPoint={mapDriver.meetingPoint || activeBooking?.meetingPoint}
