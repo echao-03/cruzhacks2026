@@ -77,7 +77,7 @@ const getClosestPointOnSegment = (point, start, end) => {
   const lengthSquared = dx * dx + dy * dy;
 
   if (lengthSquared === 0) {
-    return start;
+    return { point: start, t: 0 };
   }
 
   const t =
@@ -86,8 +86,11 @@ const getClosestPointOnSegment = (point, start, end) => {
   const clampedT = clamp(t, 0, 1);
 
   return {
-    lat: start.lat + clampedT * dx,
-    lng: start.lng + clampedT * dy,
+    point: {
+      lat: start.lat + clampedT * dx,
+      lng: start.lng + clampedT * dy,
+    },
+    t: clampedT,
   };
 };
 
@@ -98,24 +101,36 @@ const getSquaredDistance = (a, b) => {
 };
 
 const getClosestPointOnPath = (point, path) => {
-  if (!point || !path || path.length === 0) {
+  if (!point || !path || path.length < 2) {
     return null;
   }
 
   let closestPoint = path[0];
   let minDistance = getSquaredDistance(point, closestPoint);
+  let closestSegmentIndex = 0;
+  let closestT = 0;
 
   for (let i = 0; i < path.length - 1; i += 1) {
-    const candidate = getClosestPointOnSegment(point, path[i], path[i + 1]);
+    const { point: candidate, t } = getClosestPointOnSegment(
+      point,
+      path[i],
+      path[i + 1]
+    );
     const distance = getSquaredDistance(point, candidate);
 
     if (distance < minDistance) {
       minDistance = distance;
       closestPoint = candidate;
+      closestSegmentIndex = i;
+      closestT = t;
     }
   }
 
-  return closestPoint;
+  return {
+    point: closestPoint,
+    segmentIndex: closestSegmentIndex,
+    t: closestT,
+  };
 };
 
 const getWalkMetrics = (riderLocation, polyline) => {
@@ -133,16 +148,40 @@ const getWalkMetrics = (riderLocation, polyline) => {
     lat: point.lat(),
     lng: point.lng(),
   }));
-  const closestPoint = getClosestPointOnPath(riderLocation, coordinates);
 
-  if (!closestPoint) {
+  if (coordinates.length < 2) {
     return null;
   }
+
+  const closest = getClosestPointOnPath(riderLocation, coordinates);
+
+  if (!closest) {
+    return null;
+  }
+
+  let totalRouteDistance = 0;
+  const segmentDistances = [];
+
+  for (let i = 0; i < coordinates.length - 1; i += 1) {
+    const distance = window.google.maps.geometry.spherical.computeDistanceBetween(
+      new window.google.maps.LatLng(coordinates[i].lat, coordinates[i].lng),
+      new window.google.maps.LatLng(coordinates[i + 1].lat, coordinates[i + 1].lng)
+    );
+    segmentDistances.push(distance);
+    totalRouteDistance += distance;
+  }
+
+  let distanceAlongRoute = 0;
+  for (let i = 0; i < closest.segmentIndex; i += 1) {
+    distanceAlongRoute += segmentDistances[i] || 0;
+  }
+  distanceAlongRoute +=
+    (segmentDistances[closest.segmentIndex] || 0) * closest.t;
 
   const distanceMeters =
     window.google.maps.geometry.spherical.computeDistanceBetween(
       new window.google.maps.LatLng(riderLocation.lat, riderLocation.lng),
-      new window.google.maps.LatLng(closestPoint.lat, closestPoint.lng)
+      new window.google.maps.LatLng(closest.point.lat, closest.point.lng)
     );
 
   const minutes = Math.max(Math.round(distanceMeters / metersPerMinute), 1);
@@ -150,7 +189,41 @@ const getWalkMetrics = (riderLocation, polyline) => {
   return {
     distanceMeters: Math.round(distanceMeters),
     walkMinutes: minutes,
+    meetingPoint: closest.point,
+    distanceAlongRouteMeters: distanceAlongRoute,
+    routeDistanceMeters: Math.round(totalRouteDistance),
   };
+};
+
+const computeMeetingEta = (
+  departureTime,
+  arrivalTime,
+  routeDistanceMeters,
+  meetingDistanceMeters
+) => {
+  if (
+    !departureTime ||
+    !arrivalTime ||
+    !routeDistanceMeters ||
+    !meetingDistanceMeters
+  ) {
+    return '';
+  }
+
+  const depart = new Date(departureTime);
+  const arrive = new Date(arrivalTime);
+  const totalDurationMs = arrive.getTime() - depart.getTime();
+
+  if (Number.isNaN(depart.getTime()) || Number.isNaN(arrive.getTime())) {
+    return '';
+  }
+
+  if (totalDurationMs <= 0) {
+    return arrival.toISOString();
+  }
+
+  const ratio = clamp(meetingDistanceMeters / routeDistanceMeters, 0, 1);
+  return new Date(depart.getTime() + totalDurationMs * ratio).toISOString();
 };
 
 function RiderPage() {
@@ -176,6 +249,9 @@ function RiderPage() {
 
   const [selectedDriverId, setSelectedDriverId] = useState(null);
   const [availableTrips, setAvailableTrips] = useState([]);
+  const [activeBooking, setActiveBooking] = useState(null);
+  const [bookingError, setBookingError] = useState('');
+  const [bookingLoading, setBookingLoading] = useState(false);
   const hasSetDefaultsRef = useRef(false);
 
   useEffect(() => {
@@ -195,10 +271,10 @@ function RiderPage() {
     hasSetDefaultsRef.current = true;
   }, [profile]);
 
-  useEffect(() => {
+  const loadDrivers = useCallback(() => {
     let isActive = true;
 
-    const loadDrivers = async () => {
+    const run = async () => {
       setDriversLoading(true);
       setDriversError('');
 
@@ -229,17 +305,36 @@ function RiderPage() {
       setDriversLoading(false);
     };
 
-    loadDrivers();
+    run();
 
     return () => {
       isActive = false;
     };
   }, [filters.destination]);
 
+  useEffect(() => {
+    const cancel = loadDrivers();
+    return () => {
+      if (typeof cancel === 'function') {
+        cancel();
+      }
+    };
+  }, [loadDrivers]);
+
   const enrichedTrips = useMemo(() => {
     return availableTrips.map((trip) => {
       const walkMetrics = getWalkMetrics(riderLocation, trip.polyline);
-      const arrivalMinutes = getMinutesUntil(trip.estimated_arrival_time);
+      const meetingEta = walkMetrics?.meetingPoint
+        ? computeMeetingEta(
+            trip.departure_time,
+            trip.estimated_arrival_time,
+            walkMetrics.routeDistanceMeters,
+            walkMetrics.distanceAlongRouteMeters
+          )
+        : '';
+      const arrivalMinutes = getMinutesUntil(
+        meetingEta || trip.estimated_arrival_time
+      );
       const availableSeats = Math.max(trip.total_seats - (trip.seats_taken || 0), 0);
       const profileName =
         trip.profiles?.full_name || trip.profiles?.username || 'Driver';
@@ -248,11 +343,18 @@ function RiderPage() {
         id: trip.id,
         name: profileName,
         destination: destinationLabels[trip.destination] || trip.destination,
-        meetTime: `Arrives ${formatTime(trip.estimated_arrival_time)}`,
+        meetTime: walkMetrics?.meetingPoint
+          ? `Meet at ${formatTime(meetingEta)}`
+          : `Arrives ${formatTime(trip.estimated_arrival_time)}`,
         availableSeats,
         totalSeats: trip.total_seats || availableSeats,
         routePolyline: trip.polyline || '',
         walkMinutes: walkMetrics?.walkMinutes ?? null,
+        walkDistanceMeters: walkMetrics?.distanceMeters ?? null,
+        meetingPoint: walkMetrics?.meetingPoint || null,
+        meetingEta: meetingEta || '',
+        routeDistanceMeters: walkMetrics?.routeDistanceMeters ?? null,
+        distanceAlongRouteMeters: walkMetrics?.distanceAlongRouteMeters ?? null,
         arrivalMinutes,
       };
     });
@@ -290,14 +392,26 @@ function RiderPage() {
       });
   }, [enrichedTrips, filters]);
 
-  const selectedDriver = useMemo(
-    () => filteredDrivers.find((driver) => driver.id === selectedDriverId) || null,
-    [filteredDrivers, selectedDriverId]
-  );
+  const selectedDriver = useMemo(() => {
+    const fromList =
+      filteredDrivers.find((driver) => driver.id === selectedDriverId) || null;
+
+    if (fromList) {
+      return fromList;
+    }
+
+    if (activeBooking && activeBooking.tripId === selectedDriverId) {
+      return activeBooking.driver;
+    }
+
+    return null;
+  }, [filteredDrivers, selectedDriverId, activeBooking]);
 
   useEffect(() => {
     if (filteredDrivers.length === 0) {
-      setSelectedDriverId(null);
+      if (!activeBooking) {
+        setSelectedDriverId(null);
+      }
       return;
     }
 
@@ -305,10 +419,14 @@ function RiderPage() {
       (driver) => driver.id === selectedDriverId
     );
 
-    if (!stillAvailable) {
+    if (!stillAvailable && !activeBooking) {
       setSelectedDriverId(filteredDrivers[0].id);
     }
-  }, [filteredDrivers, selectedDriverId]);
+  }, [filteredDrivers, selectedDriverId, activeBooking]);
+
+  useEffect(() => {
+    setBookingError('');
+  }, [selectedDriverId]);
 
   const handleUseLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -338,6 +456,135 @@ function RiderPage() {
   const handleFilterChange = useCallback((key) => (event) => {
     setFilters((prev) => ({ ...prev, [key]: event.target.value }));
   }, []);
+
+  const mapDriver = selectedDriver || activeBooking?.driver || null;
+
+  const handleBookRide = useCallback(async () => {
+    setBookingError('');
+
+    if (!riderLocation) {
+      setBookingError('Set your location to pick a meeting point.');
+      return;
+    }
+
+    if (!selectedDriver) {
+      setBookingError('Select a driver first.');
+      return;
+    }
+
+    if (!selectedDriver.meetingPoint) {
+      setBookingError('Unable to compute your meeting point for this route.');
+      return;
+    }
+
+    setBookingLoading(true);
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      const riderId = userData?.user?.id;
+
+      if (!riderId) {
+        throw new Error('You must be logged in to book a ride.');
+      }
+
+      const { data: tripRow, error: tripError } = await supabase
+        .from('trips')
+        .select('seats_taken, total_seats')
+        .eq('id', selectedDriver.id)
+        .single();
+
+      if (tripError) {
+        throw tripError;
+      }
+
+      if ((tripRow?.seats_taken ?? 0) >= (tripRow?.total_seats ?? 0)) {
+        throw new Error('No seats left for this ride.');
+      }
+
+      const { data: bookingRow, error: bookingInsertError } = await supabase
+        .from('bookings')
+        .insert({
+          trip_id: selectedDriver.id,
+          rider_id: riderId,
+          pickup_lat: selectedDriver.meetingPoint.lat,
+          pickup_lng: selectedDriver.meetingPoint.lng,
+          walking_distance_meters: selectedDriver.walkDistanceMeters ?? null,
+        })
+        .select('id')
+        .single();
+
+      if (bookingInsertError) {
+        throw bookingInsertError;
+      }
+
+      const { error: updateError } = await supabase
+        .from('trips')
+        .update({ seats_taken: (tripRow?.seats_taken || 0) + 1 })
+        .eq('id', selectedDriver.id)
+        .eq('seats_taken', tripRow?.seats_taken || 0);
+
+      if (updateError) {
+        await supabase.from('bookings').delete().eq('id', bookingRow.id);
+        throw updateError;
+      }
+
+      setActiveBooking({
+        tripId: selectedDriver.id,
+        bookingId: bookingRow.id,
+        meetingPoint: selectedDriver.meetingPoint,
+        meetingEta: selectedDriver.meetingEta,
+        walkMinutes: selectedDriver.walkMinutes,
+        walkDistanceMeters: selectedDriver.walkDistanceMeters,
+        driver: selectedDriver,
+      });
+      setSelectedDriverId(selectedDriver.id);
+      loadDrivers();
+    } catch (err) {
+      setBookingError(err?.message || 'Unable to book this ride.');
+    } finally {
+      setBookingLoading(false);
+    }
+  }, [loadDrivers, riderLocation, selectedDriver]);
+
+  const handleCancelRide = useCallback(async () => {
+    if (!activeBooking) {
+      return;
+    }
+
+    setBookingError('');
+    setBookingLoading(true);
+
+    try {
+      if (activeBooking.bookingId) {
+        await supabase.from('bookings').delete().eq('id', activeBooking.bookingId);
+      }
+
+      const { data: tripRow } = await supabase
+        .from('trips')
+        .select('seats_taken')
+        .eq('id', activeBooking.tripId)
+        .single();
+
+      const newSeats = Math.max((tripRow?.seats_taken || 1) - 1, 0);
+
+      await supabase
+        .from('trips')
+        .update({ seats_taken: newSeats })
+        .eq('id', activeBooking.tripId);
+
+      setActiveBooking(null);
+      loadDrivers();
+    } catch (err) {
+      setBookingError(err?.message || 'Unable to cancel your ride.');
+    } finally {
+      setBookingLoading(false);
+    }
+  }, [activeBooking, loadDrivers]);
 
   if (!apiKey || loadError || !isLoaded) {
     const message = !apiKey
@@ -501,13 +748,110 @@ function RiderPage() {
                   />
                 ))}
             </div>
+
+            <div className="mt-4 rounded-2xl border border-[#d7c5b1] bg-[#f4ece0] p-4">
+              {activeBooking ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
+                        Ride reserved
+                      </p>
+                      <p className="text-sm text-[#5d5044]">
+                        Meet by {formatTime(activeBooking.meetingEta)} · Walk{' '}
+                        {activeBooking.walkMinutes ?? '—'} min
+                      </p>
+                      {activeBooking.meetingPoint && (
+                        <p className="text-xs text-[#756856]">
+                          {activeBooking.meetingPoint.lat.toFixed(5)},{' '}
+                          {activeBooking.meetingPoint.lng.toFixed(5)}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelRide}
+                      disabled={bookingLoading}
+                      className="rounded-2xl border border-[#b45d4f] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[#9b3f2f] transition hover:bg-[#f5d9d4] disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {bookingLoading ? 'Cancelling...' : 'Cancel ride'}
+                    </button>
+                  </div>
+                  <DriverCard
+                    driver={activeBooking.driver}
+                    isSelected
+                    actionLabel="Reserved"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.26em] text-[#6f604f]">
+                        Selected driver
+                      </p>
+                      <p className="text-sm text-[#5d5044]">
+                        {selectedDriver
+                          ? selectedDriver.meetingEta
+                            ? `Meet by ${formatTime(selectedDriver.meetingEta)}`
+                            : 'Meet when the driver arrives'
+                          : 'Choose a driver to continue.'}
+                      </p>
+                      {selectedDriver?.meetingPoint && (
+                        <p className="text-xs text-[#756856]">
+                          {selectedDriver.meetingPoint.lat.toFixed(5)},{' '}
+                          {selectedDriver.meetingPoint.lng.toFixed(5)}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleBookRide}
+                      disabled={
+                        bookingLoading ||
+                        !selectedDriver ||
+                        !riderLocation ||
+                        !selectedDriver.meetingPoint
+                      }
+                      className="rounded-2xl bg-[#4f5b4a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f3efe6] transition hover:bg-[#434d3d] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {bookingLoading ? 'Booking...' : 'Confirm ride'}
+                    </button>
+                  </div>
+                  {bookingError && (
+                    <p className="text-xs font-semibold text-[#9b3f2f]">
+                      {bookingError}
+                    </p>
+                  )}
+                  {selectedDriver ? (
+                    <DriverCard
+                      driver={selectedDriver}
+                      isSelected
+                      actionLabel="Selected"
+                    />
+                  ) : (
+                    <p className="text-xs text-[#6a5c4b]">
+                      Select a driver above to reserve a seat.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </SurfaceCard>
 
           <SurfaceCard className="h-[640px] p-0">
-            {riderLocation && selectedDriver?.routePolyline ? (
+            {riderLocation && mapDriver?.routePolyline ? (
               <RiderSelectionMap
                 riderLocation={riderLocation}
-                tripPolyline={selectedDriver.routePolyline}
+                tripPolyline={mapDriver.routePolyline}
+                meetingPoint={mapDriver.meetingPoint || activeBooking?.meetingPoint}
+                meetingEtaText={
+                  mapDriver?.meetingEta
+                    ? formatTime(mapDriver.meetingEta)
+                    : activeBooking?.meetingEta
+                      ? formatTime(activeBooking.meetingEta)
+                      : ''
+                }
                 mapContainerStyle={{ width: '100%', height: '100%' }}
               />
             ) : (

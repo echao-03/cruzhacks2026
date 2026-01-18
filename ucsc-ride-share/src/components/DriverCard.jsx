@@ -30,7 +30,7 @@ function SeatCubes({ available = 0, total = 4 }) {
   );
 }
 
-function DriverCard({ driver, onSelect, isSelected }) {
+function DriverCard({ driver, onSelect, isSelected, actionLabel }) {
   const isInteractive = Boolean(onSelect);
   const handleKeyDown = (event) => {
     if (!isInteractive) {
@@ -61,12 +61,27 @@ function DriverCard({ driver, onSelect, isSelected }) {
           <p className="text-xs text-[#6a5c4b]">
             {driver.destination} / {driver.meetTime}
           </p>
+          {driver.walkMinutes !== null && (
+            <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-[#756856]">
+              Walk {driver.walkMinutes} min
+              {typeof driver.walkDistanceMeters === 'number'
+                ? ` · ${Math.round(driver.walkDistanceMeters)} m`
+                : ''}
+            </p>
+          )}
         </div>
         <SeatCubes
           available={driver.availableSeats}
           total={driver.totalSeats}
         />
       </div>
+      {actionLabel && (
+        <div className="mt-3">
+          <span className="rounded-full bg-[#efe5d8] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5c4b3a]">
+            {actionLabel}
+          </span>
+        </div>
+      )}
     </SurfaceCard>
   );
 }

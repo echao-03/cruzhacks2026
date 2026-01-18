@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { GoogleMap, Marker, Polyline, InfoWindow } from '@react-google-maps/api';
-import { useLocation } from 'react-router-dom';
 
 const defaultMapContainerStyle = {
   width: '100%',
@@ -90,10 +89,10 @@ const getClosestPointOnPath = (point, path) => {
 function RiderSelectionMap({
   riderLocation,
   tripPolyline,
+  meetingPoint,
+  meetingEtaText,
   mapContainerStyle = defaultMapContainerStyle,
 }) {
-  const location = useLocation();
-  const { user, profile } = location.state || {};
   const decodedPath = useMemo(() => {
     if (
       !tripPolyline ||
@@ -109,39 +108,22 @@ function RiderSelectionMap({
     }));
   }, [tripPolyline]);
 
-  const nearestPoint = useMemo(
-    () => getClosestPointOnPath(riderLocation, decodedPath),
-    [riderLocation, decodedPath]
-  );
+  const nearestPoint = useMemo(() => {
+    if (meetingPoint) {
+      return meetingPoint;
+    }
+    return getClosestPointOnPath(riderLocation, decodedPath);
+  }, [meetingPoint, riderLocation, decodedPath]);
 
   const mapCenter =
     riderLocation || decodedPath[0] || nearestPoint || { lat: 0, lng: 0 };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* User Info Header */}
-      {profile && (
-        <div className="bg-white shadow-md p-4 mb-4">
-          <div className="max-w-4xl mx-auto">
-            <h1 className="text-2xl font-bold text-gray-800">
-              Welcome, {profile.full_name}!
-            </h1>
-            <div className="mt-2 text-sm text-gray-600">
-              <p>Email: {profile.ucsc_email}</p>
-              <p>Age: {profile.age} | Gender: {profile.gender}</p>
-              {profile.car_model && (
-                <p>Vehicle: {profile.car_color} {profile.car_model} ({profile.license_plate})</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <GoogleMap
-        mapContainerStyle={mapContainerStyle}
-        center={mapCenter}
-        zoom={14}
-      >
+    <GoogleMap
+      mapContainerStyle={mapContainerStyle}
+      center={mapCenter}
+      zoom={14}
+    >
       {decodedPath.length > 0 && (
         <Polyline path={decodedPath} options={routePolylineOptions} />
       )}
@@ -154,7 +136,14 @@ function RiderSelectionMap({
         <>
           <Marker position={nearestPoint} icon={pickupMarkerIcon} />
           <InfoWindow position={nearestPoint}>
-            <div>Walk here to meet driver</div>
+            <div>
+              <div className="font-semibold text-[#2f2a25]">Meet here</div>
+              {meetingEtaText && (
+                <div className="text-xs text-[#52463b]">
+                  Driver ETA: {meetingEtaText}
+                </div>
+              )}
+            </div>
           </InfoWindow>
         </>
       )}
@@ -166,7 +155,6 @@ function RiderSelectionMap({
         />
       )}
     </GoogleMap>
-    </div>
   );
 }
 
